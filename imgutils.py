@@ -19,13 +19,6 @@ def get_img_paths(path):
                 img_paths.append(img_path)
     return img_paths
 
-def get_labels_from_paths(img_paths):
-    labels = []
-    for img_path in img_paths:
-        label = os.path.basename(os.path.dirname(img_path))
-        labels.append(label)
-    return labels
-
 def get_dataframe(paths, labels):
     p_series = pd.Series(paths, name='filepaths')
     l_series = pd.Series(labels, name='labels')
@@ -89,34 +82,5 @@ def augment_data(train_df, valid_df, test_df, img_size, batch_size=32):
 
     return train_data, valid_data, test_data
 
-def imshow(img):
-    npimg = img.numpy()
-    plt.imshow(np.transpose(npimg, (1, 2, 0)))
-    plt.show()
-
 def draw_bounding_box(img_path):
     pass
-
-if __name__ == "__main__":
-    img_paths = get_img_paths("./ai/input/datasets/kaggle/gunavenkatdoddi/eye-diseases-classification")
-    labels = get_labels_from_paths(img_paths)
-
-    print(f"Number of images: {len(img_paths)}")
-    unique_labels = sorted(set(labels))
-    print(f"Unique Labels: {unique_labels}")
-
-    # Show one image from each unique label
-    plt.figure(figsize=(10, 10))
-    for i, label in enumerate(unique_labels[:4]):  # Show up to 4 labels
-        # First image of this label
-        idx = labels.index(label)
-        img = Image.open(img_paths[idx])
-        img = img.resize((256, 256))
-        plt.subplot(2, 2, i+1)
-        plt.imshow(img)
-        plt.title(f"Label: {label}")
-        plt.axis('off')
-
-    # plt.show()
-
-    print(get_dataframe(paths=img_paths, labels=labels))

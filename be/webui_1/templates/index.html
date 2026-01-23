@@ -7,7 +7,6 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>OcularAI | Intelligent Retinal Analysis</title>
 
-        <!-- UI Enhancements: Boxicons & Custom Fonts -->
         <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,7 +14,6 @@
             href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap"
             rel="stylesheet">
 
-        <!-- Custom Style -->
         <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
     </head>
 
@@ -39,13 +37,11 @@
 
             <main class="content">
                 <section class="hero-section">
-                    <!-- Text Side: Hero & Results -->
                     <div class="hero-info">
                         <div class="badge">Advanced Neural Diagnostics</div>
                         <h1>Precision Eye <span>Analysis</span></h1>
 
                         {% if readImg == '0' %}
-                        <!-- Initial Welcome State -->
                         <p class="description">
                             Welcome to the next generation of ocular diagnostics. Our proprietary AI analyzes retinal
                             fundus images to detect signs of common eye conditions with institutional-grade precision.
@@ -63,7 +59,6 @@
                         {% endif %}
 
                         {% if error %}
-                        <!-- Error Notification -->
                         <div class="error-msg animate-fade-in">
                             <i class='bx bx-error-circle'></i>
                             {{ error }}
@@ -71,15 +66,14 @@
                         {% endif %}
 
                         {% if readImg == '1' %}
-                        <!-- Analysis Results State -->
                         <div class="results-container animate-fade-in">
                             <div class="diagnosis-header">
                                 <span class="label">Detection Result</span>
                                 <div class="disease-voice-header">
-                                    <h2 class="disease-label">{{ data.disease_label }}</h2>
+                                    <h2 class="disease-label">Diabetic Retinopathy</h2>
                                     <button type="button" id="speak-btn" class="btn-icon" title="Listen to Result"
-                                        data-en="{{ data.speech_text_en | escape }}"
-                                        data-vi="{{ data.speech_text_vi | escape }}">
+                                        data-en="Detected Diabetic Retinopathy with 92.5% confidence."
+                                        data-vi="Phát hiện Bệnh võng mạc đái tháo đường với độ tin cậy 92.5%.">
                                         <i class='bx bx-volume-full'></i>
                                     </button>
                                 </div>
@@ -88,27 +82,41 @@
                             <div class="probabilities">
                                 <h3>Confidence Breakdown</h3>
                                 <div class="prob-list">
-                                    {% for i in range(data.labs|length) %}
-                                    {% set percentage = (data.prob[i]|float * 100)|round(1) %}
                                     <div class="prob-item">
                                         <div class="prob-info">
-                                            <span class="lab">{{ data.labs[i] }}</span>
-                                            <span class="val">{{ percentage }}%</span>
+                                            <span class="lab">Diabetic Retinopathy</span>
+                                            <span class="val">92.5%</span>
                                         </div>
                                         <div class="progress-bar">
-                                            <div class="progress" style="--progress-width: {{ percentage }}%;">
+                                            <div class="progress" style="--progress-width: 92.5%;">
                                             </div>
                                         </div>
                                     </div>
-                                    {% endfor %}
+                                    <div class="prob-item">
+                                        <div class="prob-info">
+                                            <span class="lab">Glaucoma</span>
+                                            <span class="val">5.3%</span>
+                                        </div>
+                                        <div class="progress-bar">
+                                            <div class="progress" style="--progress-width: 5.3%;">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="prob-item">
+                                        <div class="prob-info">
+                                            <span class="lab">Cataract</span>
+                                            <span class="val">2.2%</span>
+                                        </div>
+                                        <div class="progress-bar">
+                                            <div class="progress" style="--progress-width: 2.2%;">
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
                             <div class="action-buttons">
-                                <a href="{{ url_for('static', filename='images/' + data.report_filename) }}"
-                                    class="btn btn-primary" download>
-                                    <i class='bx bxs-file-pdf'></i> Export Medical Report
-                                </a>
+
                                 <a href="/" class="btn btn-secondary">
                                     <i class='bx bx-refresh'></i> New Analysis
                                 </a>
@@ -117,7 +125,6 @@
                         {% endif %}
                     </div>
 
-                    <!-- Visual Side: Upload & Image Display -->
                     <div class="upload-section">
                         <div class="upload-wrapper">
                             <div class="upload-container {% if readImg == '1' %}has-image{% endif %}" id="drop-area">
@@ -129,8 +136,8 @@
                                         <p>Standard Fundus Photography (Max 2MB)</p>
                                     </div>
                                     {% elif readImg == '1' %}
-                                    <img src="{{ data.highlighted_image_url }}" alt="Analyzed Retina"
-                                        class="analyzed-img">
+                                    <!-- <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/Fundus_photograph_of_normal_right_eye.jpg/640px-Fundus_photograph_of_normal_right_eye.jpg"
+                                        alt="Analyzed Retina" class="analyzed-img"> -->
                                     <div class="scan-overlay"></div>
                                     {% endif %}
                                 </div>
@@ -139,13 +146,11 @@
                                     <input name="filename" type="file" id="file-input" accept="image/*" hidden>
 
                                     {% if readImg == '0' %}
-                                    <button type="button" class="btn btn-upload">Select Image</button>
+                                    <button type="button" class="btn btn-upload">Upload</button>
                                     {% endif %}
 
                                     <button type="submit" class="btn btn-predict" id="predict-btn"
-                                        style="display: none;">
-                                        <i class='bx bx-brain'></i> Scan
-                                    </button>
+                                        style="display: none;">Scan</button>
                                 </form>
                             </div>
                         </div>
@@ -153,7 +158,6 @@
                 </section>
             </main>
 
-            <!-- Sticky Footer -->
             <footer>
                 <div class="footer-content">
                     <p>&copy; {{ now.year }} OcularAI Diagnostics Laboratory. Designed for demonstrative clinical
@@ -162,7 +166,6 @@
             </footer>
         </div>
 
-        <!-- Main Logic -->
         <script src="{{ url_for('static', filename='script.js') }}"></script>
     </body>
 
