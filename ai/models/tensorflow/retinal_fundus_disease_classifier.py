@@ -1,6 +1,6 @@
-from keras import regularizers
-from keras.applications import InceptionV3, EfficientNetB3
-from keras.layers import (
+from tensorflow.keras import regularizers
+from tensorflow.keras.applications import InceptionV3, EfficientNetB3
+from tensorflow.keras.layers import (
     Input,
     Activation,
     BatchNormalization,
@@ -12,13 +12,13 @@ from keras.layers import (
     MaxPooling2D,
     Average
 )
-from keras.optimizers import SGD, RMSprop, Adam, Adadelta
-from keras.utils import img_to_array
-from keras.callbacks import EarlyStopping, ModelCheckpoint, Callback
-from keras.models import Sequential, Model
-from keras.preprocessing.image import ImageDataGenerator
-from keras.metrics import Recall
-from keras import backend as K
+from tensorflow.keras.optimizers import SGD, RMSprop, Adam, Adadelta
+from tensorflow.keras.utils import img_to_array
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, Callback
+from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.metrics import Recall
+from tensorflow.keras import backend as K
 
 INPUT_SHAPE = (224, 224, 3)
 NUM_CLASSES = 4

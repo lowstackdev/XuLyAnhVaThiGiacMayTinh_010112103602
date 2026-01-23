@@ -1,9 +1,9 @@
 import cv2
 import numpy as np
 import tensorflow as tf
-from keras.models import Model
-from keras.preprocessing.image import img_to_array, load_img
-from keras.applications.imagenet_utils import preprocess_input
+from tensorflow.keras.models import Model
+from tensorflow.keras.preprocessing.image import img_to_array, load_img
+from tensorflow.keras.applications.imagenet_utils import preprocess_input
 
 GRADCAM_SIZE = (1024, 1024)
 MODEL_INPUT_SIZE = (224, 224)

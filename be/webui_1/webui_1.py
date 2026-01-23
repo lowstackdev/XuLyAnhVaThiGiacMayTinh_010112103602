@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-from keras.models import load_model
-from keras.applications.imagenet_utils import preprocess_input
-from keras.preprocessing.image import load_img, img_to_array
+from tensorflow.keras.models import load_model
+from tensorflow.keras.applications.imagenet_utils import preprocess_input
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from ai.output.gradcamutils import generate_gradcam, load_and_preprocess_image, create_superimposed_image, save_image
 from ai.output.bounding_box import draw_bounding_boxes
 from common.pdf_report import generate_pdf_report
