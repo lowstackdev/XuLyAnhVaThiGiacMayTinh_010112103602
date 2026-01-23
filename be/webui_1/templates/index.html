@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+
+    <head>
+        <meta charset="UTF-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>OcularAI | Intelligent Retinal Analysis</title>
+
+        <!-- UI Enhancements: Boxicons & Custom Fonts -->
+        <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap"
+            rel="stylesheet">
+
+        <!-- Custom Style -->
+        <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+    </head>
+
+    <body>
+        <div class="app-container">
+            <!-- Navigation Header -->
+            <header>
+                <nav class="navbar">
+                    <div class="logo-area">
+                        <img src="{{ url_for('static', filename='eye.gif') }}" class="logo"
+                            alt="Diagnostic Eye Animation">
+                        <span class="brand-name">Ocular<span>AI</span></span>
+                    </div>
+                    <div class="nav-links">
+                        <a href="/" class="nav-link active">Analyzer</a>
+                        <a href="#about" class="nav-link">Medical Info</a>
+                        <a href="#contact" class="nav-link">Support</a>
+                    </div>
+                </nav>
+            </header>
+
+            <main class="content">
+                <section class="hero-section">
+                    <!-- Text Side: Hero & Results -->
+                    <div class="hero-info">
+                        <div class="badge">Advanced Neural Diagnostics</div>
+                        <h1>Precision Eye <span>Analysis</span></h1>
+
+                        {% if readImg == '0' %}
+                        <!-- Initial Welcome State -->
+                        <p class="description">
+                            Welcome to the next generation of ocular diagnostics. Our proprietary AI analyzes retinal
+                            fundus images to detect signs of common eye conditions with institutional-grade precision.
+                        </p>
+                        <div class="info-cards">
+                            <div class="info-card">
+                                <i class='bx bx-check-shield'></i>
+                                <span>Verified Accuracy</span>
+                            </div>
+                            <div class="info-card">
+                                <i class='bx bx-bolt-circle'></i>
+                                <span>Live Inference</span>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        {% if error %}
+                        <!-- Error Notification -->
+                        <div class="error-msg animate-fade-in">
+                            <i class='bx bx-error-circle'></i>
+                            {{ error }}
+                        </div>
+                        {% endif %}
+
+                        {% if readImg == '1' %}
+                        <!-- Analysis Results State -->
+                        <div class="results-container animate-fade-in">
+                            <div class="diagnosis-header">
+                                <span class="label">Detection Result</span>
+                                <div class="disease-voice-header">
+                                    <h2 class="disease-label">{{ data.disease_label }}</h2>
+                                    <button type="button" id="speak-btn" class="btn-icon" title="Listen to Result"
+                                        data-en="{{ data.speech_text_en | escape }}"
+                                        data-vi="{{ data.speech_text_vi | escape }}">
+                                        <i class='bx bx-volume-full'></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="probabilities">
+                                <h3>Confidence Breakdown</h3>
+                                <div class="prob-list">
+                                    {% for i in range(data.labs|length) %}
+                                    {% set percentage = (data.prob[i]|float * 100)|round(1) %}
+                                    <div class="prob-item">
+                                        <div class="prob-info">
+                                            <span class="lab">{{ data.labs[i] }}</span>
+                                            <span class="val">{{ percentage }}%</span>
+                                        </div>
+                                        <div class="progress-bar">
+                                            <div class="progress" style="--progress-width: {{ percentage }}%;">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+
+                            <div class="action-buttons">
+                                <a href="{{ url_for('static', filename='images/' + data.report_filename) }}"
+                                    class="btn btn-primary" download>
+                                    <i class='bx bxs-file-pdf'></i> Export Medical Report
+                                </a>
+                                <a href="/" class="btn btn-secondary">
+                                    <i class='bx bx-refresh'></i> New Analysis
+                                </a>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Visual Side: Upload & Image Display -->
+                    <div class="upload-section">
+                        <div class="upload-wrapper">
+                            <div class="upload-container {% if readImg == '1' %}has-image{% endif %}" id="drop-area">
+                                <div class="img-area" id="img-display">
+                                    {% if readImg == '0' %}
+                                    <div class="upload-prompt">
+                                        <i class='bx bxs-cloud-upload upload-icon'></i>
+                                        <h3>Upload Retinal Scan</h3>
+                                        <p>Standard Fundus Photography (Max 2MB)</p>
+                                    </div>
+                                    {% elif readImg == '1' %}
+                                    <img src="{{ data.highlighted_image_url }}" alt="Analyzed Retina"
+                                        class="analyzed-img">
+                                    <div class="scan-overlay"></div>
+                                    {% endif %}
+                                </div>
+
+                                <form id="upload-form" action="/" method="post" enctype="multipart/form-data">
+                                    <input name="filename" type="file" id="file-input" accept="image/*" hidden>
+
+                                    {% if readImg == '0' %}
+                                    <button type="button" class="btn btn-upload">Select Image</button>
+                                    {% endif %}
+
+                                    <button type="submit" class="btn btn-predict" id="predict-btn"
+                                        style="display: none;">
+                                        <i class='bx bx-brain'></i> Scan
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </main>
+
+            <!-- Sticky Footer -->
+            <footer>
+                <div class="footer-content">
+                    <p>&copy; {{ now.year }} OcularAI Diagnostics Laboratory. Designed for demonstrative clinical
+                        research.</p>
+                </div>
+            </footer>
+        </div>
+
+        <!-- Main Logic -->
+        <script src="{{ url_for('static', filename='script.js') }}"></script>
+    </body>
+
+</html>

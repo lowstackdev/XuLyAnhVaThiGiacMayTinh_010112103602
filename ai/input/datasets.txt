@@ -1,0 +1,3 @@
+https://www.kaggle.com/datasets/gunavenkatdoddi/eye-diseases-classification
+
+https://www.kaggle.com/datasets/rohitrawat25/combined-fundus-images

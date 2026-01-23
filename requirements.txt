@@ -1,0 +1,46 @@
+# Core Deep Learning
+torch
+torchvision
+timm
+tensorflow
+keras
+
+# Data Processing
+numpy
+pandas
+opencv-python
+Pillow
+albumentations
+nltk
+kagglehub
+
+# Machine Learning
+scikit-learn
+scikit-image
+xgboost
+lightgbm
+catboost
+lightgbm
+joblib
+mlflow
+
+# Visualization
+matplotlib
+seaborn
+
+# Web Interface
+streamlit
+flask
+Flask
+werkzeug
+gunicorn
+jinja2
+pdfkit
+weasyprint
+xhtml2pdf
+
+# Report
+pyttsx3
+pytesseract
+PyMuPDF
+googletrans
