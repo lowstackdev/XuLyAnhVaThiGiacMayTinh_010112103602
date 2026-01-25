@@ -6,7 +6,8 @@ tensorflow
 keras
 keras_preprocessing
 tensorflowjs
-tensorflow_addons
+tensorflow-addons
+tensorflowjs
 
 # Data Processing
 numpy
@@ -17,6 +18,7 @@ albumentations
 nltk
 kagglehub
 scipy
+openpyxl
 
 # Machine Learning
 scikit-learn

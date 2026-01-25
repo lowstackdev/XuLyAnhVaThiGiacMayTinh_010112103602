@@ -14,9 +14,8 @@ import pandas as pd
 import seaborn as sns
 import sklearn
 import tensorflow as tf
-import tensorflow_addons as tfa
-import tensorflow.keras.optimizers
 import tensorflow.keras.backend as K
+import tensorflow.keras.optimizers
 from keras_preprocessing import image
 from keras_preprocessing.image import ImageDataGenerator
 from sklearn.model_selection import train_test_split
@@ -33,9 +32,8 @@ os.chdir('ODIR-5K')
 # %%
 from pandas import read_excel
 
-my_sheet = 'Annotation'
 file_name = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
-df = read_excel(file_name, sheet_name=my_sheet)
+df = read_excel(file_name)
 print(df.head())
 
 # %%
@@ -364,7 +362,7 @@ def CLAHE(image_path, dim, clipLimit, tileGridSize):
 
 # %%
 # Before CLAHE processing
-source = 'ODIR-5K_Training_Images/112_left.jpg'
+source = 'ODIR-5K_Training_Images/441_left.jpg'
 test = crop_image(source)
 test = np.array(test)
 img = tf.keras.preprocessing.image.array_to_img(test)
@@ -374,7 +372,7 @@ print(test.shape)
 
 # %%
 # Showing CLAHE image Preprocessing
-source = 'ODIR-5K_Training_Images/112_left.jpg'
+source = 'ODIR-5K_Training_Images/441_left.jpg'
 test = CLAHE(source, (200,200), 20, (10,10))
 test = np.array(test)
 img = tf.keras.preprocessing.image.array_to_img(test)
@@ -427,6 +425,10 @@ clahe_image = []
 list_clahe = []
 path = 'ODIR-5K_Training_Images/'
 for i in range(len(df)):
+	left_fundus_img = cv2.imread(path + df['Left-Fundus'][i])
+	right_fundus_img = cv2.imread(path + df['Right-Fundus'][i])
+	if left_fundus_img is None or right_fundus_img is None:
+		continue
 	one_hot_index_left = []
 	one_hot_index_right = []
 	for left_key in left_eye_keywords[i]:
@@ -542,7 +544,7 @@ validation_generator = validation_datagen.flow(validation_features,
 # ## Set callback method
 
 # %%
-checkpoint_path = "Trained_Models/ODIR5K/ODIR5K.ckpt"
+checkpoint_path = "Trained_Models/ODIR5K/ODIR5K.keras"
 checkpoint_dir = os.path.dirname(checkpoint_path)
 
 cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
@@ -557,7 +559,7 @@ stop_val_f1 = 0.5110
 # Define a Callback class that stops training once accuracy reaches the certain accuracy
 class CallbackStop(tf.keras.callbacks.Callback):
 	def on_epoch_end(self, epoch, logs={}):
-		if(logs.get('accuracy_multilabel') > stop_accuracy or logs.get('val_accuracy_multilabel') > stop_val_accuracy or logs.get('val_auc_value') > stop_val_auc or logs.get('val_f1_at_k') > stop_val_f1):
+		if(logs.get('accuracy_multilabel', 0.0) > stop_accuracy or logs.get('val_accuracy_multilabel', 0.0) > stop_val_accuracy or logs.get('val_f1_at_k', 0.0) > stop_val_f1):
 			print("Reached stoping value so cancelling training!")
 			self.model.stop_training = True
 
@@ -574,18 +576,8 @@ auc_value = tf.keras.metrics.AUC(name='auc_value',
                                   # thresholds=0.5,
                                   multi_label=True)
 
-kappa_score = tfa.metrics.CohenKappa(num_classes=8,
-									 name='kappa score',
-									 # sparse_labels=False,
-									 # regression=False,
-									 # weightage='quadratic',
-									 # dtype=np.int32
-									)
-
-f1_score = tfa.metrics.F1Score(num_classes=8,
-							   name='F-1 score',
-                               average='macro',
-                               threshold=0.5)
+precision_score = tf.keras.metrics.Precision(thresholds=0.5, name='precision')
+recall_score = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
 
 # %%
 @tf.function
@@ -610,7 +602,7 @@ def macro_f1(y, y_hat, thresh=0.5):
 
 @tf.function
 def accuracy_multilabel(y, y_hat):
-	correct_prediction = tf.equal(tf.round(y_hat), y)
+	correct_prediction = tf.equal(tf.round(y_hat), tf.cast(y, tf.float32))
 	# correct_prediction = tf.equal(tf.round(tf.nn.sigmoid(y_hat)), tf.round(y))
 	# mean
 	correct_prediction = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
@@ -621,7 +613,7 @@ def accuracy_multilabel(y, y_hat):
 
 @tf.function
 def accuracy_multilabel2(y, y_hat):
-	correct_prediction = tf.equal(tf.round(y_hat), tf.round(y))
+	correct_prediction = tf.equal(tf.round(y_hat), tf.round(tf.cast(y, tf.float32)))
 	# correct_prediction = tf.equal(tf.round(tf.nn.sigmoid(y_hat)), tf.round(y))
 	# mean
 	# correct_prediction = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
@@ -661,11 +653,13 @@ class MetricsAtTopK:
 
 	def true_positives_at_k(self, y_true, y_pred):
 		prediction_tensor = self._get_prediction_tensor(y_pred=y_pred)
+		y_true = tf.cast(y_true, tf.float32)
 		true_positive = K.sum(tf.multiply(prediction_tensor, y_true))
 		return true_positive
 
 	def false_positives_at_k(self, y_true, y_pred):
 		prediction_tensor = self._get_prediction_tensor(y_pred=y_pred)
+		y_true = tf.cast(y_true, tf.float32)
 		true_positive = K.sum(tf.multiply(prediction_tensor, y_true))
 		c2 = K.sum(prediction_tensor)  # TP + FP
 		false_positive = c2 - true_positive
@@ -673,6 +667,7 @@ class MetricsAtTopK:
 
 	def false_negatives_at_k(self, y_true, y_pred):
 		prediction_tensor = self._get_prediction_tensor(y_pred=y_pred)
+		y_true = tf.cast(y_true, tf.float32)
 		true_positive = K.sum(tf.multiply(prediction_tensor, y_true))
 		c3 = K.sum(y_true)  # TP + FN
 		false_negative = c3 - true_positive
@@ -680,12 +675,14 @@ class MetricsAtTopK:
 
 	def precision_at_k(self, y_true, y_pred):
 		prediction_tensor = self._get_prediction_tensor(y_pred=y_pred)
+		y_true = tf.cast(y_true, tf.float32)
 		true_positive = K.sum(tf.multiply(prediction_tensor, y_true))
 		c2 = K.sum(prediction_tensor)  # TP + FP
 		return true_positive / (c2 + K.epsilon())
 
 	def recall_at_k(self, y_true, y_pred):
 		prediction_tensor = self._get_prediction_tensor(y_pred=y_pred)
+		y_true = tf.cast(y_true, tf.float32)
 		true_positive = K.sum(tf.multiply(prediction_tensor, y_true))
 		c3 = K.sum(y_true)  # TP + FN
 		return true_positive / (c3 + K.epsilon())
@@ -712,7 +709,7 @@ def hamming_loss(y_true, y_pred, mode='multiclass'):
 		nonzero = tf.cast(tf.math.count_nonzero(y_true - y_pred, axis=-1), tf.float32)
 		return nonzero / y_true.get_shape()[-1]
 
-class HammingLoss(tf.python.keras.metrics.MeanMetricWrapper):
+class HammingLoss(tf.keras.metrics.MeanMetricWrapper):
 	def __init__(self, name='hamming_loss', dtype=None, mode='multiclass'):
 		super(HammingLoss, self).__init__(hamming_loss, name, dtype=dtype, mode=mode)
 
@@ -755,7 +752,7 @@ def multilabel_cross_entropy(y, y_hat):
 @tf.function
 def npairs_multilabel_loss(y_true, y_pred):
 	y_pred = tf.matmul(y_true, y_pred, transpose_a=False, transpose_b=True)
-	loss = tfa.losses.npairs_multilabel_loss(y, y_pred)
+	loss = tf.losses.npairs_multilabel_loss(y, y_pred)
 	return loss
 
 @tf.function
@@ -863,7 +860,7 @@ if (use_model == "using custom"):
 # %%
 use_training_model = False
 
-checkpoint_path = model_path + 'ODIR5K.ckpt'
+checkpoint_path = model_path + 'ODIR5K.keras'
 checkpoint_dir = os.path.dirname(checkpoint_path)
 model_save_weights = 'weight'
 model_save_name_h5 = 'ODIR5K.h5'
@@ -908,9 +905,8 @@ model.compile(loss='binary_crossentropy',
 			  metrics_at_top_k.f1_at_k,
 			  # f1_score, # not suitable metric for multilabel
 			  # kappa_score, #cannot in multilabel
-			  auc_value,
-              # hamming_loss, #cannot apply
-              ])
+			  precision_score,
+			  recall_score])
 
 # %%
 history = model.fit(train_generator,
@@ -935,7 +931,7 @@ history = model.fit(train_generator,
 # %%
 training_path = 'ODIR-5K_Training_Images/'
 training_list = os.listdir('ODIR-5K_Training_Images/')
-output = tfa.metrics.MultiLabelConfusionMatrix(num_classes=8)
+output = tf.metrics.MultiLabelConfusionMatrix(num_classes=8)
 print("file name", "\t\t\t\t\t", "true label", "\t\t", "prediction label","\t", "accuracy score")
 count_true = 0
 count_half = 0

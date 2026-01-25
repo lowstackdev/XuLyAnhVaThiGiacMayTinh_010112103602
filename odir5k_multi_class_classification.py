@@ -2,22 +2,20 @@
 # #Set Dependencies
 
 # %%
-import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
-import pandas as pd
-import sklearn
-
-import tensorflow as tf
-import tensorflow_addons as tfa
-import keras_preprocessing
-from keras_preprocessing import image
-from keras_preprocessing.image import ImageDataGenerator
-import tensorflow.keras.optimizers
-
 import os
 import shutil
 from random import sample
+
+import keras_preprocessing
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import sklearn
+import tensorflow as tf
+import tensorflow.keras.optimizers
+from keras_preprocessing import image
+from keras_preprocessing.image import ImageDataGenerator
 
 print(tf.__version__)
 
@@ -27,9 +25,8 @@ os.chdir('ODIR-5K')
 # %%
 from pandas import read_excel
 
-my_sheet = 'Annotation'
 file_name = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
-df = read_excel(file_name, sheet_name=my_sheet)
+df = read_excel(file_name)
 print(df.head())
 
 # %%
@@ -184,7 +181,7 @@ def intersect_from_multi_label(m_key_all):
   mall_key_diagnosis = []
   for i in range(len(m_key_all)):
     m_key_all[i] = list(set(m_key_all[i]))
-    mall_key_diagnosis = mall_key_diagnosis+list(set(m_key_all[i]))
+    mall_key_diagnosis = mall_key_diagnosis + list(set(m_key_all[i]))
   for row in double_diagnosis_row:
     not_listed_list = []
     listed_list = []
@@ -296,9 +293,9 @@ test_dir = 'testing'
 training_source_path = 'ODIR-5K_Training_Images/'
 testing_source_path = 'ODIR-5K_Testing_Images/'
 
-training_path = 'ODIR-5K_Training_Images/'
-validation_path = 'ODIR-5K_Testing_Images/'
-testing_path = 'ODIR-5K_Testing_Images/'
+training_path = 'training/'
+validation_path = 'validation/'
+testing_path = 'testing/'
 
 if os.path.exists(training_path) or os.path.exists(validation_path) or os.path.exists(testing_path):
   shutil.rmtree(training_path)
@@ -312,7 +309,7 @@ os.mkdir(test_dir)
 for i in label_string:
   os.mkdir(train_dir + '/' + i)
   os.mkdir(validation_dir + '/' + i)
-  # os.mkdir(test_dir+'/'+i)
+  os.mkdir(test_dir+'/'+i)
 
 # %%
 testing_source_files = os.listdir(testing_source_path)
@@ -333,9 +330,6 @@ testing_files = testing_source_files
 print(len(training_files))
 print(len(validation_files))
 print(len(testing_files))
-# validation_file = testing_source_files
-# print(len(validation_files))
-# validation_files
 
 # %%
 temp_df = df['Left-Fundus']
@@ -367,36 +361,36 @@ for file_name in training_files:
 
   if nrow == None:
     # print("file not listed in data")
-    shutil.copyfile(training_source_path+file_name, training_path+file_name)
+    shutil.copyfile(training_source_path + file_name, training_path + file_name)
     continue
 
   for i in temp_keywords[nrow]:
     if i in key_normal:
-      shutil.copyfile(training_source_path+file_name, training_path+'Normal/'+file_name)
+      shutil.copyfile(training_source_path + file_name, training_path + 'Normal/' + file_name)
       continue
     if i in key_diabetes:
-      shutil.copyfile(training_source_path+file_name, training_path+'Diabetes/'+file_name)
+      shutil.copyfile(training_source_path + file_name, training_path + 'Diabetes/' + file_name)
       continue
     if i in key_glaucoma:
-      shutil.copyfile(training_source_path+file_name, training_path+'Glaucoma/'+file_name)
+      shutil.copyfile(training_source_path + file_name, training_path + 'Glaucoma/' + file_name)
       continue
     if i in key_cataract:
-      shutil.copyfile(training_source_path+file_name, training_path+'Cataract/'+file_name)
+      shutil.copyfile(training_source_path + file_name, training_path + 'Cataract/' + file_name)
       continue
     if i in key_amd:
-      shutil.copyfile(training_source_path+file_name, training_path+'AMD/'+file_name)
+      shutil.copyfile(training_source_path + file_name, training_path + 'AMD/' + file_name)
       continue
     if i in key_hypertension:
-      shutil.copyfile(training_source_path+file_name, training_path+'Hypertension/'+file_name)
+      shutil.copyfile(training_source_path + file_name, training_path + 'Hypertension/' + file_name)
       continue
     if i in key_myopia:
-      shutil.copyfile(training_source_path+file_name, training_path+'Myopia/'+file_name)
+      shutil.copyfile(training_source_path + file_name, training_path + 'Myopia/' + file_name)
       continue
     if i in key_other_disease:
-      shutil.copyfile(training_source_path+file_name, training_path+'Abnormalities/'+file_name)
+      shutil.copyfile(training_source_path + file_name, training_path + 'Abnormalities/' + file_name)
       continue
     # else:
-    print("Not in list key:", "| row : ", row, "| file name : ", file_name, "| key diagnosis : ", i)
+    print("Not in list key:", "| row:", row, "| file name:", file_name, "| key diagnosis:", i)
     not_sorted_files.append(file_name)
     not_sorted_files=list(set(not_sorted_files))
     # break
@@ -456,10 +450,10 @@ for file_name in validation_files:
     not_sorted_files.append(file_name)
     not_sorted_files=list(set(not_sorted_files))
 
-print(len(os.listdir(validation_path+'AMD')))
-print(len(os.listdir(validation_path+'Abnormalities')))
-print(len(os.listdir(validation_path+'Normal')))
-print(len(os.listdir(validation_path+'Cataract')))
+print(len(os.listdir(validation_path + 'AMD')))
+print(len(os.listdir(validation_path + 'Abnormalities')))
+print(len(os.listdir(validation_path + 'Normal')))
+print(len(os.listdir(validation_path + 'Cataract')))
 
 # %%
 for file_name in testing_files:
@@ -510,10 +504,10 @@ for file_name in testing_files:
     not_sorted_files.append(file_name)
     not_sorted_files=list(set(not_sorted_files))
 
-# print(len(os.listdir(testing_path+'AMD')))
-# print(len(os.listdir(testing_path+'Abnormalities')))
-# print(len(os.listdir(testing_path+'Normal')))
-# print(len(os.listdir(testing_path+'Cataract')))
+print(len(os.listdir(testing_path + 'AMD')))
+print(len(os.listdir(testing_path + 'Abnormalities')))
+print(len(os.listdir(testing_path + 'Normal')))
+print(len(os.listdir(testing_path + 'Cataract')))
 print(len(os.listdir(testing_path)))
 
 # %%
@@ -603,22 +597,11 @@ auc_value = tf.keras.metrics.AUC(
                                   # threshold=0.5,
                                   multi_label=True)
 
-kappa_score = tfa.metrics.CohenKappa(num_classes=8,
-                                     name='kappa score',
-                                     # sparse_labels=False,
-                                     # regression=False,
-                                     # weightage='quadratic',
-                                     # dtype=np.int32,
-                                    )
-
-f1_score = tfa.metrics.F1Score(num_classes=8,
-                               name='F-1 score',
-                               # average='macro',
-                               # threshold=0.5,
-                              )
+precision_score = tf.keras.metrics.Precision(name='precision')
+recall_score = tf.keras.metrics.Recall(name='recall')
 
 model_path = 'Trained_Models/ODIR5K-bottleneck/'
-checkpoint_path = model_path + 'ODIR5K.ckpt'
+checkpoint_path = model_path + 'ODIR5K.keras'
 checkpoint_dir = os.path.dirname(checkpoint_path)
 
 model_save_weights = 'weight'
@@ -627,20 +610,20 @@ model_save_name_tf = 'ODIR5K_TF'
 
 use_training_model = True
 
-if (os.path.isfile(model_path+model_save_name_h5) or os.path.exists(model_path+model_save_name_tf)) and use_training_model:
+if (os.path.isfile(model_path + model_save_name_h5) or os.path.exists(model_path + model_save_name_tf)) and use_training_model:
   # if os.path.exists(model_path+model_save_name_tf):
   #   print("Using tf")
   #   model = tf.keras.models.load_model(model_path+model_save_name_tf)
-  if os.path.isfile(model_path+model_save_name_h5):
+  if os.path.isfile(model_path + model_save_name_h5):
     print("Using h5")
-    model = tf.keras.models.load_model(model_path+model_save_name_h5)
+    model = tf.keras.models.load_model(model_path + model_save_name_h5)
   # model.summary()
   output = model.output
 else:
   print("No using saved model")
   model = tf.keras.models.Sequential([
-    # The first convolution
-    tf.keras.layers.Conv2D(32, (3,3), activation='relu', input_shape=input_shape),
+    tf.keras.Input(shape=input_shape),
+    tf.keras.layers.Conv2D(32, (3,3), activation='relu'),
     tf.keras.layers.Conv2D(32, (3,3), activation='relu'),
     tf.keras.layers.MaxPooling2D(2, 2),
     tf.keras.layers.BatchNormalization(),
@@ -672,10 +655,10 @@ else:
 model.summary()
 model.compile(loss='categorical_crossentropy',
               optimizer=optimizer,
-              metrics=['accuracy', kappa_score, f1_score, auc_value])
+              metrics=['accuracy', precision_score, recall_score, auc_value])
 
 # %%
-checkpoint_path = "Trained_Models/ODIR5K/ODIR5K.ckpt"
+checkpoint_path = "Trained_Models/ODIR5K/ODIR5K.keras"
 checkpoint_dir = os.path.dirname(checkpoint_path)
 
 cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
@@ -831,7 +814,7 @@ model.predict('ODIR-5K/testing/1000_left.jpg')
 
 # %%
 # for i_file in test_list:
-img = tf.keras.preprocessing.image.load_img('ODIR-5K/testing/1604_left.jpg', target_size=target_size,)
+img = tf.keras.preprocessing.image.load_img('ODIR-5K/testing/1604_left.jpg', target_size=target_size)
 img_plot = plt.imshow(img)
 img_array = tf.keras.preprocessing.image.img_to_array(img)
 img_array = np.expand_dims(img_array, axis=0)
@@ -849,7 +832,7 @@ print("Predicted as:", np.argmax(classes))
 # %%
 # for i_file in test_list:
 img = tf.keras.preprocessing.image.load_img('ODIR-5K/validation/Abnormalities/1031_left.jpg', target_size=target_size,)
-# img = tf.keras.preprocessing.image.load_img('/tmp/ODIR-5K/training/Diabetes/1022_left.jpg', target_size=target_size,)
+# img = tf.keras.preprocessing.image.load_img('/ODIR-5K/training/Diabetes/1022_left.jpg', target_size=target_size)
 img_plot = plt.imshow(img)
 img_array = tf.keras.preprocessing.image.img_to_array(img)
 img_array = np.expand_dims(img_array, axis=0)
