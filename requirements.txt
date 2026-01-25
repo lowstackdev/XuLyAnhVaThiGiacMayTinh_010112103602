@@ -4,6 +4,9 @@ torchvision
 timm
 tensorflow
 keras
+keras_preprocessing
+tensorflowjs
+tensorflow_addons
 
 # Data Processing
 numpy
@@ -13,6 +16,7 @@ Pillow
 albumentations
 nltk
 kagglehub
+scipy
 
 # Machine Learning
 scikit-learn
