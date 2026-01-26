@@ -6,7 +6,6 @@ import os
 import shutil
 from random import sample
 
-import keras_preprocessing
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -14,8 +13,8 @@ import seaborn as sns
 import sklearn
 import tensorflow as tf
 import tensorflow.keras.optimizers
-from keras_preprocessing import image
-from keras_preprocessing.image import ImageDataGenerator
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 print(tf.__version__)
 
@@ -549,38 +548,52 @@ if color_mode == 'rgb':
   shape_add = (3,)
 
 # %%
-train_datagen = ImageDataGenerator(rescale = 1./255,
-                                   zoom_range=0.2,
-                                   rotation_range=40,
-                                   # horizontal_flip=True,
-                                   # width_shift_range=0.2,
-                                   # height_shift_range=0.2,
-                                   # shear_range=0.2,
-                                   fill_mode='nearest',
+# 1. Load Raw Datasets
+raw_train_ds = tf.keras.utils.image_dataset_from_directory(
+    training_path,
+    labels='inferred',
+    label_mode='categorical',
+    color_mode=color_mode,
+    batch_size=32,
+    image_size=target_size,
+    shuffle=True,
+    seed=42,
+    interpolation='lanczos3'
+)
 
-                                   # featurewise_center=False,  # set input mean to 0 over the dataset
-                                   # samplewise_center=False,  # set each sample mean to 0
-                                   # featurewise_std_normalization=False,  # divide inputs by std of the dataset
-                                   # samplewise_std_normalization=False,  # divide each input by its std
-                                   # zca_whitening=False,  # apply ZCA whitening
-                                   # vertical_flip=False
-                                   )
+raw_val_ds = tf.keras.utils.image_dataset_from_directory(
+    validation_path,
+    labels='inferred',
+    label_mode='categorical',
+    color_mode=color_mode,
+    batch_size=32,
+    image_size=target_size,
+    shuffle=False,
+    interpolation='lanczos3'
+)
 
-validation_datagen = ImageDataGenerator(rescale = 1./255)
+# Capture class names for label decoding
+class_names = raw_train_ds.class_names
 
-train_generator = train_datagen.flow_from_directory(training_path,
-                                                    target_size=target_size,
-                                                    # interpolation="lanczos",
-                                                    # batch_size=80,
-                                                    class_mode='categorical',
-                                                    color_mode=color_mode)
+# 2. Define Preprocessing/Augmentation Pipeline
+augmentation_layers = tf.keras.Sequential([
+    tf.keras.layers.RandomRotation(factor=40/360, fill_mode='nearest'), # rotation_range=40
+    tf.keras.layers.RandomZoom(height_factor=0.2, width_factor=0.2, fill_mode='nearest'), # zoom_range=0.2
+])
 
-validation_generator = validation_datagen.flow_from_directory(validation_path,
-                                                              target_size=target_size,
-                                                              # interpolation="lanczos",
-                                                              # batch_size=25,
-                                                              class_mode='categorical',
-                                                              color_mode=color_mode)
+rescaling_layer = tf.keras.layers.Rescaling(1./255)
+
+def prepare_dataset(ds, augment=False):
+    # Apply rescaling to all
+    ds = ds.map(lambda x, y: (rescaling_layer(x), y), num_parallel_calls=tf.data.AUTOTUNE)
+    if augment:
+        # Apply augmentations only to training
+        ds = ds.map(lambda x, y: (augmentation_layers(x, training=True), y), num_parallel_calls=tf.data.AUTOTUNE)
+    # Enable caching and prefetching for high performance
+    return ds.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+
+train_generator = prepare_dataset(raw_train_ds, augment=True)
+validation_generator = prepare_dataset(raw_val_ds)
 
 # %%
 n_epoch = 25
@@ -652,7 +665,7 @@ else:
   ])
   # model.compile(loss = 'categorical_crossentropy', optimizer=optimizer, metrics=['accuracy'])
 
-model.summary()
+model.summary(line_length=100)
 model.compile(loss='categorical_crossentropy',
               optimizer=optimizer,
               metrics=['accuracy', precision_score, recall_score, auc_value])
@@ -714,11 +727,11 @@ val_acc = history.history['val_accuracy']
 loss = history.history['loss']
 val_loss = history.history['val_loss']
 
-kappa = history.history['kappa score']
-val_kappa = history.history['val_kappa score']
+precision = history.history['precision']
+val_precision = history.history['val_precision']
 
-f1 = history.history['F-1 score']
-val_f1 = history.history['F-1 score']
+recall = history.history['recall']
+val_recall = history.history['val_recall']
 
 auc = history.history['auc']
 val_auc = history.history['val_auc']
@@ -737,9 +750,9 @@ plt.title('Training and validation loss')
 plt.legend(loc=1)
 plt.figure()
 
-plt.plot(epochs_training, kappa, 'r', label='Training kappa score')
-plt.plot(epochs_training, val_kappa, 'y', label='Validation kappa score')
-plt.title('Training and validation kappa score')
+plt.plot(epochs_training, precision, 'r', label='Training Precision')
+plt.plot(epochs_training, val_precision, 'y', label='Validation Precision')
+plt.title('Training and validation Precision')
 plt.legend(loc=2)
 plt.figure()
 
@@ -749,9 +762,9 @@ plt.title('Training and validation AUC value')
 plt.legend(loc=3)
 plt.figure()
 
-plt.plot(epochs_training, f1, 'r', label='Training F1 score')
-plt.plot(epochs_training, val_f1, 'y', label='Validation F1 score')
-plt.title('Training and validation F1 score')
+plt.plot(epochs_training, recall, 'r', label='Training Recall')
+plt.plot(epochs_training, val_recall, 'y', label='Validation Recall')
+plt.title('Training and validation Recall')
 plt.legend(loc=4)
 plt.figure()
 
@@ -767,8 +780,8 @@ plt.show()
 # model = tf.keras.models.load_model(model_path + model_save_name_h5)
 
 # %%
-label_keys = list(train_generator.class_indices.keys())
-label_values = list(train_generator.class_indices.values())
+label_keys = class_names
+label_values = list(range(len(class_names)))
 
 def get_key_indices(val):
   return label_keys[label_values.index(val)]
@@ -807,7 +820,7 @@ for i_file in range(0, 10):
   print("File:", testing_path+test_list[i_file]," | predicted as:", get_key_indices(np.argmax(classes)), "at:", np.argmax(classes), classes)
 
 # %%
-model.evaluate_generator(validation_generator)
+model.evaluate(validation_generator)
 
 # %%
 model.predict('ODIR-5K/testing/1000_left.jpg')

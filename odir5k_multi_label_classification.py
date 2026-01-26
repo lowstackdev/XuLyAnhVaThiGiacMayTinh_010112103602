@@ -6,20 +6,15 @@ import os
 import shutil
 from random import sample
 
-import cv2
-import keras_preprocessing
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import sklearn
 import tensorflow as tf
-import tensorflow.keras.backend as K
 import tensorflow.keras.optimizers
-from keras_preprocessing import image
-from keras_preprocessing.image import ImageDataGenerator
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MultiLabelBinarizer
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 print(tf.__version__)
 
@@ -502,40 +497,33 @@ for i in range(2):
 # ## set image data generator for training
 
 # %%
-train_datagen = ImageDataGenerator(rescale = 1./255,
-								   rotation_range=30,
-								   horizontal_flip=True,
-									# shear_range=0.2,
-									# zoom_range=0.2,
-									# fill_mode='nearest',
-									# vertical_flip=False
-									# featurewise_center=True,  # set input mean to 0 over the dataset
-									# featurewise_std_normalization=True,  # divide inputs by std of the dataset
-									# samplewise_std_normalization=True,  # divide each input by its std
-									# samplewise_center=True,  # set each sample mean to 0
-									# zca_whitening=False,  # apply ZCA whitening
-									# validation_split=0.1,
-									)
+# 1. Define Preprocessing/Augmentation Pipeline
+augmentation_layers = tf.keras.Sequential([
+    tf.keras.layers.RandomRotation(factor=30/360, fill_mode='nearest'), # rotation_range=30
+    tf.keras.layers.RandomFlip("horizontal"), # horizontal_flip=True
+])
 
-# train_datagen.fit(feature_images)
+rescaling_layer = tf.keras.layers.Rescaling(1./255)
 
-train_generator = train_datagen.flow(training_features,
-									 y=training_labels,
-									 batch_size=32,
-									 # subset='training'
-									 )
+def prepare_dataset(features, labels, augment=False):
+    # Create dataset from numpy arrays
+    ds = tf.data.Dataset.from_tensor_slices((features, labels))
 
-validation_datagen = ImageDataGenerator(rescale = 1./255)
+    # Apply rescaling (features are 0-255 numpy arrays from CLAHE processing)
+    ds = ds.map(lambda x, y: (rescaling_layer(tf.cast(x, tf.float32)), y),
+                num_parallel_calls=tf.data.AUTOTUNE)
 
-validation_generator = validation_datagen.flow(validation_features,
-											   y=validation_labels,
-											   batch_size=32,
-												# subset='validation'
-												)
+    if augment:
+        # Shuffle and apply augmentations only to training
+        ds = ds.shuffle(buffer_size=min(len(features), 1000))
+        ds = ds.map(lambda x, y: (augmentation_layers(x, training=True), y),
+                    num_parallel_calls=tf.data.AUTOTUNE)
 
-# train_datagen_noaugment = ImageDataGenerator(rescale = 1./255)
+    # Batch and prefetch for performance
+    return ds.batch(32).prefetch(buffer_size=tf.data.AUTOTUNE)
 
-# train_generator_noaugment = train_datagen_noaugment.flow(training_features, y=training_labels, batch_size=32, subset='training')
+train_generator = prepare_dataset(training_features, training_labels, augment=True)
+validation_generator = prepare_dataset(validation_features, validation_labels)
 
 # %% [markdown]
 # # Train
@@ -551,15 +539,12 @@ cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
 												 # save_weights_only=True,
 												 verbose=1)
 
-stop_accuracy = 0.950
-stop_val_accuracy = 0.8970
 stop_val_auc = 0.8200
-stop_val_f1 = 0.5110
 
 # Define a Callback class that stops training once accuracy reaches the certain accuracy
 class CallbackStop(tf.keras.callbacks.Callback):
 	def on_epoch_end(self, epoch, logs={}):
-		if(logs.get('accuracy_multilabel', 0.0) > stop_accuracy or logs.get('val_accuracy_multilabel', 0.0) > stop_val_accuracy or logs.get('val_f1_at_k', 0.0) > stop_val_f1):
+		if(logs.get('accuracy_multilabel', 0.0) > stop_accuracy or logs.get('val_accuracy_multilabel', 0.0) > stop_val_accuracy):
 			print("Reached stoping value so cancelling training!")
 			self.model.stop_training = True
 
@@ -580,25 +565,6 @@ precision_score = tf.keras.metrics.Precision(thresholds=0.5, name='precision')
 recall_score = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
 
 # %%
-@tf.function
-def macro_f1(y, y_hat, thresh=0.5):
-	"""Compute the macro F1-score on a batch of observations (average F1 across labels)
-
-	Args:
-			y (int32 Tensor): labels array of shape (BATCH_SIZE, N_LABELS)
-			y_hat (float32 Tensor): probability matrix from forward propagation of shape (BATCH_SIZE, N_LABELS)
-			thresh: probability value above which we predict positive
-
-	Returns:
-			macro_f1 (scalar Tensor): value of macro F1 for the batch
-	"""
-	y_pred = tf.cast(tf.greater(y_hat, thresh), tf.float32)
-	tp = tf.cast(tf.math.count_nonzero(y_pred * y, axis=0), tf.float32)
-	fp = tf.cast(tf.math.count_nonzero(y_pred * (1 - y), axis=0), tf.float32)
-	fn = tf.cast(tf.math.count_nonzero((1 - y_pred) * y, axis=0), tf.float32)
-	f1 = 2 * tp / (2 * tp + fn + fp + 1e-16)
-	macro_f1 = tf.reduce_mean(f1)
-	return macro_f1
 
 @tf.function
 def accuracy_multilabel(y, y_hat):
@@ -687,12 +653,6 @@ class MetricsAtTopK:
 		c3 = K.sum(y_true)  # TP + FN
 		return true_positive / (c3 + K.epsilon())
 
-	def f1_at_k(self, y_true, y_pred):
-		precision = self.precision_at_k(y_true=y_true, y_pred=y_pred)
-		recall = self.recall_at_k(y_true=y_true, y_pred=y_pred)
-		f1 = (2 * precision * recall) / (precision + recall + K.epsilon())
-		return f1
-
 metrics_at_top_k = MetricsAtTopK(k=5)
 
 @tf.function
@@ -719,27 +679,6 @@ hl_metric = HammingLoss()
 # ## set loss function for training
 
 # %%
-@tf.function
-def macro_soft_f1(y, y_hat):
-	"""Compute the macro soft F1-score as a cost (average 1 - soft-F1 across all labels).
-	Use probability values instead of binary predictions.
-
-	Args:
-		y (int32 Tensor): targets array of shape (BATCH_SIZE, N_LABELS)
-		y_hat (float32 Tensor): probability matrix from forward propagation of shape (BATCH_SIZE, N_LABELS)
-
-	Returns:
-		cost (scalar Tensor): value of the cost function for the batch
-	"""
-	y = tf.cast(y, tf.float32)
-	y_hat = tf.cast(y_hat, tf.float32)
-	tp = tf.reduce_sum(y_hat * y, axis=0)
-	fp = tf.reduce_sum(y_hat * (1 - y), axis=0)
-	fn = tf.reduce_sum((1 - y_hat) * y, axis=0)
-	soft_f1 = 2 * tp / (2 * tp + fn + fp + 1e-16)
-	cost = 1 - soft_f1 # reduce 1 - soft-f1 in order to increase soft-f1
-	macro_cost = tf.reduce_mean(cost) # average on all labels
-	return macro_cost
 
 @tf.function
 def multilabel_cross_entropy(y, y_hat):
@@ -786,7 +725,7 @@ if ("use transfer learning" in use_model):
 	for layer in base_model.layers:
 		layer.trainable = False
 
-	base_model.summary()
+	base_model.summary(line_length=100)
 	# last_layer = base_model.get_layer('block4_pool')
 	# conn = last_layer.output
 
@@ -893,20 +832,13 @@ else:
 		model = tf.keras.Model(base_model.input, conn)
 	# model.compile(loss = 'categorical_crossentropy', optimizer=optimizer, metrics=['accuracy'])
 
-model.summary()
+model.summary(line_length=100)
 model.compile(loss='binary_crossentropy',
               # macro_soft_f1, # not suitable loss for multilabel
               # npairs_multilabel_loss, #cannot use in this model
               # hamming_loss_func
 			  optimizer=optimizer,
-			  metrics=[accuracy_multilabel,
-			  # 'accuracy', # not suitable metric for multilabel
-			  # macro_f1, # not suitable metric for multilabel
-			  metrics_at_top_k.f1_at_k,
-			  # f1_score, # not suitable metric for multilabel
-			  # kappa_score, #cannot in multilabel
-			  precision_score,
-			  recall_score])
+			  metrics=[accuracy_multilabel, auc_value, precision_score, recall_score])
 
 # %%
 history = model.fit(train_generator,
@@ -986,20 +918,17 @@ open(model_path + "ODIR5K.tflite", "wb").write(tflite_model)
 # ##plot the training and validation step
 
 # %%
-f1_str = 'f1_at_k'
-val_f1_str = 'val_' + f1_str
+precision = history.history['precision']
+val_precision = history.history['val_precision']
+
+recall = history.history['recall']
+val_recall = history.history['val_recall']
 
 acc = history.history['accuracy_multilabel']
 val_acc = history.history['val_accuracy_multilabel']
 
 loss = history.history['loss']
 val_loss = history.history['val_loss']
-
-# kappa = history.history['kappa score']
-# val_kappa = history.history['val_kappa score']
-
-f1 = history.history[f1_str]
-val_f1 = history.history[val_f1_str]
 
 auc = history.history['auc_value']
 val_auc = history.history['val_auc_value']
@@ -1033,12 +962,17 @@ plt.legend(loc=3)
 plt.figure()
 plt.savefig(model_path + 'AUC.png')
 
-plt.plot(epochs_training, f1, 'r', label='Training F1 score')
-plt.plot(epochs_training, val_f1, 'y', label='Validation F1 score')
-plt.title('Training and validation F1 score')
-plt.legend(loc=4)
+plt.plot(epochs_training, precision, 'r', label='Training Precision')
+plt.plot(epochs_training, val_precision, 'y', label='Validation Precision')
+plt.title('Training and validation Precision')
+plt.legend(loc=2)
 plt.figure()
-plt.savefig(model_path + 'f1 top 5.png')
+
+plt.plot(epochs_training, recall, 'r', label='Training Recall')
+plt.plot(epochs_training, val_recall, 'y', label='Validation Recall')
+plt.title('Training and validation Recall')
+plt.legend(loc=4)
+plt.savefig(model_path + 'precision_recall.png')
 
 plt.show()
 
