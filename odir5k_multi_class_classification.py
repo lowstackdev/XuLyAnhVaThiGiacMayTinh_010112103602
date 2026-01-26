@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MultiLabelBinarizer
 import tensorflow as tf
-import tensorflow.keras.optimizers
 from tensorflow.keras.preprocessing import image
 
 print(tf.__version__)
@@ -19,11 +18,8 @@ print(tf.__version__)
 # %%
 os.chdir('ODIR-5K')
 
-# %%
-from pandas import read_excel
-
 file_name = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
-df = read_excel(file_name)
+df = pd.read_excel(file_name)
 print(df.head())
 
 # %%
@@ -204,10 +200,6 @@ string = 'central serous chorioretinopathy'
 print(string in key_other_disease)
 
 # %%
-train_dir = 'training'
-validation_dir = 'validation'
-test_dir = 'testing'
-
 training_source_path = 'ODIR-5K_Training_Images/'
 testing_source_path = 'ODIR-5K_Testing_Images/'
 
@@ -220,14 +212,14 @@ if os.path.exists(training_path) or os.path.exists(validation_path) or os.path.e
   shutil.rmtree(validation_path)
   shutil.rmtree(testing_path)
 
-os.mkdir(train_dir)
-os.mkdir(validation_dir)
-os.mkdir(test_dir)
+os.mkdir(training_path)
+os.mkdir(validation_path)
+os.mkdir(testing_path)
 
 for i in label_string:
-  os.mkdir(train_dir + '/' + i)
-  os.mkdir(validation_dir + '/' + i)
-  os.mkdir(test_dir + '/' + i)
+  os.mkdir(training_path + '/' + i)
+  os.mkdir(validation_path + '/' + i)
+  os.mkdir(testing_path + '/' + i)
 
 # %%
 testing_source_files = os.listdir(testing_source_path)
@@ -788,9 +780,9 @@ for i_file in test_list:
   images = np.vstack([img_array])
   classes = model.predict(images, batch_size=8)
   # probability_model = tf.keras.Sequential([model, tf.keras.layers.Softmax()])
-  # classes = probability_model.predict(images,batch_size=10)
+  # classes = probability_model.predict(images, batch_size=10)
   print("File:", testing_path + i_file," | predicted as:", get_key_indices(np.argmax(classes)), "at:", np.argmax(classes), " | x", np.argmax((model.predict(images) > 0.05).astype("int32")))
-  # print("predicted as: ", classes)
+  # print("Predicted as: ", classes)
 
 # %%
 test_dir = 'ODIR-5K/testing/'

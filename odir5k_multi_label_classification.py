@@ -10,8 +10,6 @@ import pandas as pd
 from sklearn.preprocessing import MultiLabelBinarizer
 import cv2
 import tensorflow as tf
-import tensorflow.keras.optimizers
-import tensorflow.keras.backend as K
 
 print(tf.__version__)
 
@@ -38,7 +36,7 @@ right_eye_keywords = right_eye_keywords.str.split("，").apply(lambda x: list(se
 print(left_eye_keywords[2])
 
 # %% [markdown]
-# ## set the different keyword diagnosis label
+# ## Set the different keyword diagnosis label
 
 # %%
 mlb = MultiLabelBinarizer()
@@ -50,7 +48,7 @@ all_diagnosis = list(mlb.classes_)
 print("Total different keys diagnosis:", len(all_diagnosis))
 
 # %% [markdown]
-# ## get keywords from single label
+# ## Get keywords from single label
 
 # %%
 test_df = df.copy()
@@ -155,7 +153,7 @@ not_listed = list(not_listed)
 print("Not listed diagnosis key:", len(not_listed))
 
 # %% [markdown]
-# ## get keywords from multilabel
+# ## Get keywords from multilabel
 
 # %%
 def intersect_from_multi_label(keyword_groups):
@@ -200,10 +198,10 @@ while processing_required:
         processing_required = False
 
 # %% [markdown]
-# ## add non recognized label to a label with the likelihood of approaching
+# ## Add non recognized label to a label with the likelihood of approaching
 
 # %%
-#manual listing key
+#Manual listing key
 keywords_to_process = [
     ('suspected cataract', 3),
     ('image offset', 4)
@@ -225,22 +223,10 @@ print(string in key_other_disease)
 training_source_path = 'ODIR-5K_Training_Images/'
 testing_source_path = 'ODIR-5K_Tesing_Images/'
 
-training_path = 'training/'
-validation_path = 'validation/'
-testing_path = 'testing/'
-
 # %% [markdown]
 # ## Image processing
 
 # %%
-# Define croping function with tensorflow resize
-def crop_image(image_path):
-	image_data = tf.keras.preprocessing.image.load_img(image_path)
-	array = tf.keras.preprocessing.image.img_to_array(image_data)
-	image = tf.image.resize(array, [200,200], method='bilinear', preserve_aspect_ratio=True, antialias=False)
-	# image = image / 255.0
-	return image
-
 # Define method for image resize, croping and image Contrast Limited Adaptive Histogram Equalization (CLAHE)
 # using Opencv 4
 
@@ -251,7 +237,6 @@ def image_resize(image_path, dim):
 		y = img.shape[0] // 2
 		x = x-y
 		img = img[0:0 + img.shape[0], x:x + img.shape[0]]
-	# resize image
 	return cv2.resize(img, dim, interpolation = cv2.INTER_AREA)
 
 def CLAHE(image_path, dim, clipLimit, tileGridSize):
@@ -266,34 +251,15 @@ def CLAHE(image_path, dim, clipLimit, tileGridSize):
 	return img
 
 # %%
-# Before CLAHE processing
-source = 'ODIR-5K_Training_Images/441_left.jpg'
-test = crop_image(source)
-test = np.array(test)
-img = tf.keras.preprocessing.image.array_to_img(test)
-plt.imshow(img)
-test = np.expand_dims(test, axis=0)
-print(test.shape)
-
-# %%
-# Showing CLAHE image Preprocessing
-source = 'ODIR-5K_Training_Images/441_left.jpg'
-test = CLAHE(source, (200,200), 20, (10,10))
-test = np.array(test)
-img = tf.keras.preprocessing.image.array_to_img(test)
-plt.imshow(img)
-test = test.reshape(1, 200, 200, 3)
-print(test.shape)
-
-# %%
 # Set target size image
-
 target_size = (230, 230)
 # color_mode = 'grayscale'
 color_mode = 'rgb'
+shape_add = (3,)  # Default to RGB
+
 if color_mode == 'grayscale':
 	shape_add = (1,)
-if color_mode == 'rgb':
+elif color_mode == 'rgb':
 	shape_add = (3,)
 
 # %% [markdown]
@@ -314,11 +280,10 @@ def get_multi_label_from_keys(idx_label):
 	for i in range(8):
 		if i in idx_label:
 			tmp_label.append(1)
-		else :
+		else:
 			tmp_label.append(0)
 	return tmp_label
 
-# %%
 synthetic_labels = []
 synthetic_features = []
 clahe_images = []
@@ -355,7 +320,7 @@ for i in range(len(df)):
         continue
 
 # %% [markdown]
-# ## split feature, label, and file name for training, validation and test
+# ## Split feature, label, and file name for training, validation and test
 
 # %%
 import numpy as np
@@ -379,7 +344,7 @@ del tmp_validation_labels
 del tmp_validation_filenames
 
 # %% [markdown]
-# ## show some image for training
+# ## Show some image for training
 
 # %%
 f, ax = plt.subplots(2, 5)
@@ -394,7 +359,7 @@ for idx in range(10):
 plt.tight_layout()
 
 # %% [markdown]
-# ## show some image for validation
+# ## Show some image for validation
 
 # %%
 f, ax = plt.subplots(2, 5)
@@ -406,9 +371,8 @@ for idx in range(10):
 plt.tight_layout()
 
 # %% [markdown]
-# ## set image data generator for training
+# ## Set image data generator for training
 
-# %%
 # 1. Define Preprocessing/Augmentation Pipeline
 augmentation_layers = tf.keras.Sequential([
     tf.keras.layers.RandomRotation(factor=30/360, fill_mode='nearest'), # rotation_range=30
@@ -443,7 +407,6 @@ validation_generator = prepare_dataset(validation_features, validation_labels)
 # %% [markdown]
 # ## Set callback method
 
-# %%
 checkpoint_path = "Trained_Models/ODIR5K-Multi-Label/ODIR5K.keras"
 checkpoint_dir = os.path.dirname(checkpoint_path)
 
@@ -467,7 +430,6 @@ callback_stop = CallbackStop()
 # %% [markdown]
 # ## Set metric for training
 
-# %%
 auc_value = tf.keras.metrics.AUC(name='auc_value',
                                   # num_thresholds=200,
                                   curve='ROC',
@@ -479,7 +441,6 @@ precision_score = tf.keras.metrics.Precision(thresholds=0.5, name='precision')
 recall_score = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
 
 # %%
-
 @tf.function
 def accuracy_multilabel(y, y_hat):
 	correct_prediction = tf.equal(tf.round(y_hat), tf.cast(y, tf.float32))
@@ -491,108 +452,8 @@ def accuracy_multilabel(y, y_hat):
 	# correct_prediction = tf.reduce_mean(all_labels_true)
 	return correct_prediction
 
-@tf.function
-def accuracy_multilabel2(y, y_hat):
-	correct_prediction = tf.equal(tf.round(y_hat), tf.round(tf.cast(y, tf.float32)))
-	# correct_prediction = tf.equal(tf.round(tf.nn.sigmoid(y_hat)), tf.round(y))
-	# mean
-	# correct_prediction = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-	# all
-	correct_prediction = tf.reduce_min(tf.cast(correct_prediction, tf.float32), 1)
-	correct_prediction = tf.reduce_mean(correct_prediction)
-	return correct_prediction
-
-@tf.function
-def exact_match_fn(y_true, y_logits):
-	threshold=0.5
-	#pred = tf.equal(tf.round(y_logits), tf.round(y_true))
-	predictions = tf.cast(tf.greater_equal(y_logits, threshold), dtype=tf.float32)
-	pred_match = tf.equal(predictions, tf.round(y_true))
-	exact_match = tf.reduce_min(tf.cast(pred_match, dtype=tf.float32), axis=1)
-	return exact_match
-
-@tf.function
-def exact_match_prop_fn(*args):
-	return tf.reduce_mean(exact_match_fn(*args))
-
-class MetricsAtTopK:
-	def __init__(self, k):
-		self.k = k
-
-	def _get_prediction_tensor(self, y_pred):
-		"""Takes y_pred and creates a tensor of same shape with 1 in indices where, the values are in top_k
-		"""
-		topk_values, topk_indices = tf.nn.top_k(y_pred, k=self.k, sorted=False, name="topk")
-		# the topk_indices are along last axis (1). Add indices for axis=0
-		ii, _ = tf.meshgrid(tf.range(tf.shape(y_pred)[0]), tf.range(self.k), indexing='ij')
-		index_tensor = tf.reshape(tf.stack([ii, topk_indices], axis=-1), shape=(-1, 2))
-		prediction_tensor = y_pred
-		# prediction_tensor =  tf.sparse.to_dense(sparse_indices=index_tensor, output_shape=tf.shape(y_pred), default_value=0, sparse_values=1.0, validate_indices=False)
-		prediction_tensor = tf.cast(prediction_tensor, K.floatx())
-		return prediction_tensor
-
-	def true_positives_at_k(self, y_true, y_pred):
-		prediction_tensor = self._get_prediction_tensor(y_pred=y_pred)
-		y_true = tf.cast(y_true, tf.float32)
-		true_positive = K.sum(tf.multiply(prediction_tensor, y_true))
-		return true_positive
-
-	def false_positives_at_k(self, y_true, y_pred):
-		prediction_tensor = self._get_prediction_tensor(y_pred=y_pred)
-		y_true = tf.cast(y_true, tf.float32)
-		true_positive = K.sum(tf.multiply(prediction_tensor, y_true))
-		c2 = K.sum(prediction_tensor)  # TP + FP
-		false_positive = c2 - true_positive
-		return false_positive
-
-	def false_negatives_at_k(self, y_true, y_pred):
-		prediction_tensor = self._get_prediction_tensor(y_pred=y_pred)
-		y_true = tf.cast(y_true, tf.float32)
-		true_positive = K.sum(tf.multiply(prediction_tensor, y_true))
-		c3 = K.sum(y_true)  # TP + FN
-		false_negative = c3 - true_positive
-		return false_negative
-
-	def precision_at_k(self, y_true, y_pred):
-		prediction_tensor = self._get_prediction_tensor(y_pred=y_pred)
-		y_true = tf.cast(y_true, tf.float32)
-		true_positive = K.sum(tf.multiply(prediction_tensor, y_true))
-		c2 = K.sum(prediction_tensor)  # TP + FP
-		return true_positive / (c2 + K.epsilon())
-
-	def recall_at_k(self, y_true, y_pred):
-		prediction_tensor = self._get_prediction_tensor(y_pred=y_pred)
-		y_true = tf.cast(y_true, tf.float32)
-		true_positive = K.sum(tf.multiply(prediction_tensor, y_true))
-		c3 = K.sum(y_true)  # TP + FN
-		return true_positive / (c3 + K.epsilon())
-
-metrics_at_top_k = MetricsAtTopK(k=5)
-
-@tf.function
-def hamming_loss(y_true, y_pred, mode='multiclass'):
-	if mode not in ['multiclass', 'multilabel']:
-		raise TypeError('mode must be: [multiclass, multilabel])')
-
-	if mode == 'multiclass':
-		nonzero = tf.cast(tf.math.count_nonzero(y_true * y_pred, axis=-1), tf.float32)
-		print(nonzero)
-		return 1.0 - nonzero
-
-	else:
-		nonzero = tf.cast(tf.math.count_nonzero(y_true - y_pred, axis=-1), tf.float32)
-		return nonzero / y_true.get_shape()[-1]
-
-class HammingLoss(tf.keras.metrics.MeanMetricWrapper):
-	def __init__(self, name='hamming_loss', dtype=None, mode='multiclass'):
-		super(HammingLoss, self).__init__(hamming_loss, name, dtype=dtype, mode=mode)
-
-hl_metric = HammingLoss()
-
 # %% [markdown]
 # ## set loss function for training
-
-# %%
 
 @tf.function
 def multilabel_cross_entropy(y, y_hat):
@@ -602,63 +463,12 @@ def multilabel_cross_entropy(y, y_hat):
 	loss = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=1))
 	return loss
 
-@tf.function
-def npairs_multilabel_loss(y_true, y_pred):
-	y_pred = tf.matmul(y_true, y_pred, transpose_a=False, transpose_b=True)
-	loss = tf.losses.npairs_multilabel_loss(y, y_pred)
-	return loss
-
-@tf.function
-def hamming_loss_func(y_true, y_pred):
-	diff = tf.cast(y_true - y_pred, dtype=tf.float32)
-
-	#Counting non-zeros in a differentiable way
-	epsilon = K.epsilon()
-	nonzero = tf.reduce_sum(tf.math.abs(diff / (tf.math.abs(diff) + epsilon)))
-
-	return tf.reduce_mean(nonzero / K.int_shape(y_pred)[-1])
-
 # %% [markdown]
 # ## Define Model
 
 # %%
-# use_model = "use transfer learning using vgg19"
-# use_model = "use transfer learning using mobilenetv2"
 use_model = "using custom"
 
-# %%
-if ("use transfer learning" in use_model):
-	if("using vgg19" in use_model):
-		base_model= tf.keras.applications.VGG19(include_top=False, weights="imagenet", input_shape=target_size + shape_add,)
-		model_path = 'Trained_Models/ODIR-5K-VGG19-Multi-Label/'
-
-	if("using mobilenetv2" in use_model):
-		base_model= tf.keras.applications.MobileNetV2(include_top=False, weights="imagenet", input_shape=target_size + shape_add,)
-		model_path = 'Trained_Models/ODIR-5K-MobileNetV2-Multi-Label/'
-
-	for layer in base_model.layers:
-		layer.trainable = False
-
-	base_model.summary(line_length=100)
-	# last_layer = base_model.get_layer('block4_pool')
-	# conn = last_layer.output
-
-	conn = base_model.output
-
-	conn = tf.keras.layers.Flatten()(conn)
-	conn = tf.keras.layers.Dense(256, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(conn)
-	conn = tf.keras.layers.BatchNormalization()(conn)
-	# conn = tf.keras.layers.Dropout(0.2)(conn)
-	conn = tf.keras.layers.Dense(128, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(conn)
-	# conn = tf.keras.layers.BatchNormalization()(conn)
-	# conn = tf.keras.layers.Dropout(0.4)(conn)
-	# conn = tf.keras.layers.Dense(96, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(conn)
-	# conn = tf.keras.layers.BatchNormalization()(conn)
-	conn = tf.keras.layers.Dropout(0.2)(conn)
-	# conn = tf.keras.layers.Dense(64, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(conn)
-	# conn = tf.keras.layers.BatchNormalization()(conn)
-	# conn = tf.keras.layers.Dropout(0.4)(conn)
-	conn = tf.keras.layers.Dense(8, activation='sigmoid')(conn)
 if (use_model == "using custom"):
 	model_path = 'Trained_Models/ODIR-5K-VGG16_like-Multi-Label/'
 
@@ -710,7 +520,6 @@ if (use_model == "using custom"):
 # %% [markdown]
 # training dataset
 
-# %%
 use_training_model = False
 
 checkpoint_path = model_path + 'ODIR5K.keras'
@@ -721,19 +530,12 @@ model_save_name_tf = 'ODIR5K_TF'
 model_save_name_js = 'ODIR5K_TFJS'
 
 n_epoch = 25
-# target_size = (200,200)
-# shape_add = (3,)
 input_shape = target_size + shape_add
 learning_rate = 1e-4
-# loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
 loss = "binary_crossentropy"
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-# tf.keras.optimizers.SGD(learning_rate=learning_rate)
 
 if (os.path.isfile(model_path + model_save_name_h5) or os.path.exists(model_path + model_save_name_tf)) and use_training_model:
-	# if os.path.exists(model_path + model_save_name_tf):
-	# 	print("Using tf")
-	# 	model = tf.keras.models.load_model(model_path + model_save_name_tf)
 	if os.path.isfile(model_path + model_save_name_h5):
 		print("Using h5")
 		model = tf.keras.models.load_model(model_path + model_save_name_h5)
@@ -742,9 +544,6 @@ else:
 	print("No using saved model")
 	if (use_model == "using custom"):
 		model = tf.keras.Model(inputs=inputs, outputs=conn)
-	else:
-		model = tf.keras.Model(base_model.input, conn)
-	# model.compile(loss = 'categorical_crossentropy', optimizer=optimizer, metrics=['accuracy'])
 
 model.summary(line_length=100)
 model.compile(loss='binary_crossentropy',
@@ -756,17 +555,10 @@ model.compile(loss='binary_crossentropy',
 
 # %%
 history = model.fit(train_generator,
-					# train_generator_noaugment,
 					validation_data=validation_generator,
 					epochs=50,
-					# steps_per_epoch=100,
-					# batch_size=train_generator.batch_size,
-					# steps_per_epoch = train_generator.samples // train_generator.batch_size,
-					# validation_steps = validation_generator.samples // validaition_generator.batch_size,
 					verbose=1,
-					callbacks=[callback_stop,
-							# cp_callback
-							])
+					callbacks=[callback_stop])
 
 # %% [markdown]
 # # Evaluate
@@ -775,8 +567,7 @@ history = model.fit(train_generator,
 # ## Validation test trained model
 
 # %%
-training_path = 'ODIR-5K_Training_Images/'
-training_list = os.listdir('ODIR-5K_Training_Images/')
+training_path = training_source_path
 output = tf.metrics.MultiLabelConfusionMatrix(num_classes=8)
 print("file name", "\t\t\t\t\t", "true label", "\t\t", "prediction label","\t", "accuracy score")
 count_true = 0
@@ -784,17 +575,13 @@ count_half = 0
 count_zero = 0
 for i in range(0, len(validation_test_filenames)):
 	source = training_path + validation_test_filenames[i]
-	# img = tf.keras.preprocessing.image.load_img(source, target_size=target_size,)
 	img = CLAHE(source, target_size, 20, (10,10))
-	# cv_imshow(img)
 	img_array = tf.keras.preprocessing.image.img_to_array(img)
 	img_array = np.expand_dims(img_array, axis=0)
 	img_array = img_array/255.0
 	images = np.vstack([img_array])
 	predict = model.predict(images)
-	# print(predict.shape)
 	predict = predict.reshape(8)
-	# y_true = validation_test_labels[i].reshape(1,8)
 	predict = tf.cast(predict >= 0.5, np.int32)
 	y_true = tf.constant(validation_test_labels[i], dtype=tf.int32)
 	y_pred = tf.constant(predict.numpy(), dtype=tf.int32)
@@ -802,22 +589,19 @@ for i in range(0, len(validation_test_filenames)):
 	count_true = count_true + 1 if acc_ml == 1.0 else count_true
 	count_half = count_half + 1 if 0.75 <= acc_ml < 1 and 1 in predict.numpy().tolist() else count_half
 	count_zero = count_zero + 1 if 1 not in predict.numpy().tolist() else count_zero
-	# output.update_state(y_true, y_pred)
 	print("---------------------------------------------------------------------------------------------------")
 	print(source, "\t", validation_test_labels[i], "\t", predict.numpy(), "\t", acc_ml)
-	# print(output.result().numpy())
 
 print('\n',"true:", count_true, "| half true:", count_half, "| zero:", count_zero)
 
 # %% [markdown]
-# ## save the trained model
+# ## Save the trained model
 
-# %%
 model.save_weights(model_path)
 model.save_weights(model_path + model_save_weights)
 model.save(model_path)
 model.save(model_path + model_save_name_h5)
-model.save(model_path + model_save_name_tf,save_format='tf')
+model.save(model_path + model_save_name_tf, save_format='tf')
 
 # %%
 import tensorflowjs as tfjs
@@ -829,7 +613,7 @@ tflite_model = converter.convert()
 open(model_path + "ODIR5K.tflite", "wb").write(tflite_model)
 
 # %% [markdown]
-# ## plot the training and validation step
+# ## Plot the training and validation step
 
 # %%
 precision = history.history['precision']
@@ -863,12 +647,6 @@ plt.legend(loc=1)
 plt.figure()
 plt.savefig(model_path + 'loss.png')
 
-# plt.plot(epochs_training, kappa, 'r', label='Training kappa score')
-# plt.plot(epochs_training, val_kappa, 'y', label='Validation kappa score')
-# plt.title('Training and validation kappa score')
-# plt.legend(loc=2)
-# plt.figure()
-
 plt.plot(epochs_training, auc, 'r', label='Training AUC value')
 plt.plot(epochs_training, val_auc, 'y', label='Validation AUC value')
 plt.title('Training and validation AUC value')
@@ -891,23 +669,18 @@ plt.savefig(model_path + 'precision_recall.png')
 plt.show()
 
 # %% [markdown]
-# ## testing model
+# ## Testing model
 
 # %%
-# for ifile in test_list:
-test_path = 'ODIR-5K_Tesing_Images/'
-test_list = os.listdir('ODIR-5K_Tesing_Images/')
+test_path = testing_source_path
+test_list = os.listdir(testing_source_path)
 test_list.sort()
-# source = 'ODIR-5K_Training_Images/12_left.jpg'
 for i in range(0, len(test_list), 5):
-	source = test_path+test_list[i]
-	# img = tf.keras.preprocessing.image.load_img(source, target_size=target_size,)
+	source = test_path + test_list[i]
 	img = CLAHE(source, target_size, 20, (10,10))
-	# cv_imshow(img)
 	img_array = tf.keras.preprocessing.image.img_to_array(img)
 	img_array = np.expand_dims(img_array, axis=0)
 	images = np.vstack([img_array])/255
 	classes = model.predict(images)
-	# print(classes, '\n')
 	classes = tf.cast(classes > 0.5, float)
 	print(source, classes)
