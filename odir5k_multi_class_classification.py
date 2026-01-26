@@ -1,5 +1,11 @@
 # %% [markdown]
-# #Set Dependencies
+# # ODIR-5K Multi-Class Classification Pipeline
+
+# %% [markdown]
+# ## 1. Setup and Dependencies
+
+# %% [markdown]
+# ### 1.1 Import Libraries
 
 # %%
 import os
@@ -18,9 +24,16 @@ print(tf.__version__)
 # %%
 os.chdir('ODIR-5K')
 
-file_name = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
-df = pd.read_excel(file_name)
+# %% [markdown]
+# ### 1.2 Load Dataset
+
+# %%
+FILE_NAME = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
+df = pd.read_excel(FILE_NAME)
 print(df.head())
+
+# %% [markdown]
+# ### 1.3 Extract and Process Diagnostic Keywords
 
 # %%
 left_eye_keywords = df['Left-Diagnostic Keywords'].copy()
@@ -31,6 +44,9 @@ right_eye_keywords = right_eye_keywords.str.split("，").apply(lambda x: list(se
 
 print(left_eye_keywords[2])
 
+# %% [markdown]
+# ### 1.4 MultiLabelBinarizer Setup
+
 # %%
 mlb = MultiLabelBinarizer()
 
@@ -39,6 +55,12 @@ mlb.fit(combined_keywords)
 
 all_diagnosis = list(mlb.classes_)
 print("Total different keys diagnosis:", len(all_diagnosis))
+
+# %% [markdown]
+# ## 2. Keyword Analysis and Processing
+
+# %% [markdown]
+# ### 2.1 Extract Single-Label Keywords
 
 # %%
 test_df = df.copy()
@@ -71,13 +93,16 @@ key_hypertension = get_key_diagnosis_single(test_df.columns[12])
 key_myopia = get_key_diagnosis_single(test_df.columns[13])
 key_other_disease = get_key_diagnosis_single(test_df.columns[14])
 
-label_string = ['Normal', 'Diabetes', 'Glaucoma', 'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Abnormalities']
+LABEL_STRINGS = ['Normal', 'Diabetes', 'Glaucoma', 'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Abnormalities']
 key_all = [key_normal, key_diabetes, key_glaucoma, key_cataract, key_amd, key_hypertension, key_myopia, key_other_disease]
 
 for i in range(8):
-  print(label_string[i], len(key_all[i]))
+  print(LABEL_STRINGS[i], len(key_all[i]))
 
 print(key_normal)
+
+# %% [markdown]
+# ### 2.2 Remove Duplicate Keywords
 
 # %%
 key_all_sets = [set(keywords) for keywords in key_all]
@@ -101,11 +126,14 @@ for i in range(len(key_all_sets)):
 # Print results
 print("Intersect by normal:")
 for i in range(len(key_all)):
-  print(label_string[i], len(key_all[i]))
+  print(LABEL_STRINGS[i], len(key_all[i]))
 
 print("Intersect by other:")
 for i in range(len(key_all)):
-  print(label_string[i], len(key_all[i]))
+  print(LABEL_STRINGS[i], len(key_all[i]))
+
+# %% [markdown]
+# ### 2.3 Get All Recognized Keywords
 
 # %%
 def get_all_recognized_key(key_all):
@@ -119,9 +147,12 @@ def get_all_recognized_key(key_all):
 all_key_diagnosis = get_all_recognized_key(key_all)
 print("Total unique keywords:", len(all_key_diagnosis))
 
+# %% [markdown]
+# ### 2.4 Process Double Diagnosis Rows
+
 # %%
 double_diagnosis_row = list(set(double_diagnosis_row))
-print("Double lablel row:", len(double_diagnosis_row))
+print("Double label row:", len(double_diagnosis_row))
 double_diagnosis_row.sort()
 
 # %%
@@ -141,6 +172,9 @@ for row in double_diagnosis_row:
 
 not_listed = list(not_listed)
 print("Not listed diagnosis key:", len(not_listed))
+
+# %% [markdown]
+# ### 2.5 Get Keywords from Multi-Label
 
 # %%
 def intersect_from_multi_label(keyword_groups):
@@ -184,8 +218,11 @@ while processing_required:
     print(True)
     processing_required = False
 
+# %% [markdown]
+# ### 2.6 Add Non-Recognized Labels
+
 # %%
-#manual listing key
+# manual listing key
 keywords_to_process = [('suspected cataract', 3)]
 for keyword, disease_group_index in keywords_to_process:
   if keyword in unrecognized_keywords_list and keyword not in all_key_diagnosis:
@@ -199,43 +236,52 @@ print(key_all[3])
 string = 'central serous chorioretinopathy'
 print(string in key_other_disease)
 
-# %%
-training_source_path = 'ODIR-5K_Training_Images/'
-testing_source_path = 'ODIR-5K_Testing_Images/'
+# %% [markdown]
+# ## 3. Path Configuration and Data Organization
 
-training_path = 'training/'
-validation_path = 'validation/'
-testing_path = 'testing/'
+# %% [markdown]
+# ### 3.1 Set Paths
+
+# %%
+TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images/'
+TESTING_SOURCE_PATH = 'ODIR-5K_Testing_Images/'
+
+TRAINING_PATH = 'training/'
+VALIDATION_PATH = 'validation/'
+TESTING_PATH = 'testing/'
 
 # Remove existing directories if they exist
-for path in [training_path, validation_path, testing_path]:
+for path in [TRAINING_PATH, VALIDATION_PATH, TESTING_PATH]:
   if os.path.exists(path):
     shutil.rmtree(path)
 
 # Create main directories and subdirectories for each label
-for path in [training_path, validation_path, testing_path]:
-  for label in label_string:
+for path in [TRAINING_PATH, VALIDATION_PATH, TESTING_PATH]:
+  for label in LABEL_STRINGS:
     os.makedirs(os.path.join(path, label), exist_ok=True)
 
+# %% [markdown]
+# ### 3.2 Load and Split Data
+
 # %%
-testing_source_files = os.listdir(testing_source_path)
+testing_source_files = os.listdir(TESTING_SOURCE_PATH)
 print(len(testing_source_files))
-training_source_files = os.listdir(training_source_path)
+training_source_files = os.listdir(TRAINING_SOURCE_PATH)
 print(len(training_source_files))
 
-# training_files = training_source_files
+VALIDATION_FRACTION = 0.1
+N_VALIDATION = int(len(training_source_files) * VALIDATION_FRACTION)
+N_TRAINING = len(training_source_files) - N_VALIDATION
 
-fraction = 0.1
-
-nvalidation = int(len(training_source_files) * fraction)
-ntraining = len(training_source_files) - nvalidation
-
-validation_files = sample(training_source_files, nvalidation)
-training_files = sample(training_source_files, ntraining)
+validation_files = sample(training_source_files, N_VALIDATION)
+training_files = sample(training_source_files, N_TRAINING)
 testing_files = testing_source_files
 print(len(training_files))
 print(len(validation_files))
 print(len(testing_files))
+
+# %% [markdown]
+# ### 3.3 Organize Images by Diagnosis
 
 # %%
 def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
@@ -276,44 +322,50 @@ def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
         break
 
 # Process training files
-organize_eye_images_by_diagnosis(training_files, training_source_path, training_path)
+organize_eye_images_by_diagnosis(training_files, TRAINING_SOURCE_PATH, TRAINING_PATH)
 
-print(len(os.listdir(training_path + 'AMD')))
-print(len(os.listdir(training_path + 'Abnormalities')))
-print(len(os.listdir(training_path + 'Normal')))
-print(len(os.listdir(training_path + 'Cataract')))
+print(len(os.listdir(TRAINING_PATH + 'AMD')))
+print(len(os.listdir(TRAINING_PATH + 'Abnormalities')))
+print(len(os.listdir(TRAINING_PATH + 'Normal')))
+print(len(os.listdir(TRAINING_PATH + 'Cataract')))
 
 # Process validation files
-organize_eye_images_by_diagnosis(validation_files, training_source_path, validation_path)
+organize_eye_images_by_diagnosis(validation_files, TRAINING_SOURCE_PATH, VALIDATION_PATH)
 
-print(len(os.listdir(validation_path + 'AMD')))
-print(len(os.listdir(validation_path + 'Abnormalities')))
-print(len(os.listdir(validation_path + 'Normal')))
-print(len(os.listdir(validation_path + 'Cataract')))
+print(len(os.listdir(VALIDATION_PATH + 'AMD')))
+print(len(os.listdir(VALIDATION_PATH + 'Abnormalities')))
+print(len(os.listdir(VALIDATION_PATH + 'Normal')))
+print(len(os.listdir(VALIDATION_PATH + 'Cataract')))
 
 # Process testing files
-organize_eye_images_by_diagnosis(testing_files, testing_source_path, testing_path)
+organize_eye_images_by_diagnosis(testing_files, TESTING_SOURCE_PATH, TESTING_PATH)
 
-print(len(os.listdir(testing_path + 'AMD')))
-print(len(os.listdir(testing_path + 'Abnormalities')))
-print(len(os.listdir(testing_path + 'Normal')))
-print(len(os.listdir(testing_path + 'Cataract')))
-print(len(os.listdir(testing_path)))
+print(len(os.listdir(TESTING_PATH + 'AMD')))
+print(len(os.listdir(TESTING_PATH + 'Abnormalities')))
+print(len(os.listdir(TESTING_PATH + 'Normal')))
+print(len(os.listdir(TESTING_PATH + 'Cataract')))
+print(len(os.listdir(TESTING_PATH)))
+
+# %% [markdown]
+# ### 3.4 Verify Data Organization
 
 # %%
 from pathlib import Path
 
-training_dir = Path(training_path)
+training_dir = Path(TRAINING_PATH)
 total_files = sum(len(list(subdir.glob('*'))) for subdir in training_dir.iterdir() if subdir.is_dir())
 print(total_files)
 
-print(len(os.listdir(training_source_path)))
+print(len(os.listdir(TRAINING_SOURCE_PATH)))
+
+# %% [markdown]
+# ### 3.5 Image Analysis
 
 # %%
 from PIL import Image
 
-cataract_image_list = os.listdir(training_path + 'Cataract')
-image_path = training_path + 'Cataract/' + cataract_image_list[2]
+cataract_image_list = os.listdir(TRAINING_PATH + 'Cataract')
+image_path = TRAINING_PATH + 'Cataract/' + cataract_image_list[2]
 im = Image.open(image_path)
 width, height = im.size
 print(width, height, "from", image_path)
@@ -324,50 +376,60 @@ plt.imshow(img)
 img = image.load_img(image_path, target_size=(int(height/16), int(width/16)), interpolation="lanczos")
 plt.imshow(img)
 
-# %%
-# target_size = (int(height/16),int(width/16))
-target_size = (200, 300)
-# mode = 'grayscale'
-color_mode = 'rgb'
-shape_add = (3,)  # Default to RGB
+# %% [markdown]
+# ## 4. Image Configuration
 
-if color_mode == 'grayscale':
-  shape_add = (1,)
-if color_mode == 'rgb':
-  shape_add = (3,)
+# %% [markdown]
+# ### 4.1 Set Target Size and Color Mode
+
+# %%
+TARGET_SIZE = (200, 300) # (int(height/16),int(width/16))
+COLOR_MODE = 'rgb' # 'grayscale'
+SHAPE_ADD = (3,)  # Default to RGB
+if COLOR_MODE == 'grayscale':
+  SHAPE_ADD = (1,)
+if COLOR_MODE == 'rgb':
+  SHAPE_ADD = (3,)
+
+# %% [markdown]
+# ## 5. Data Loading and Preprocessing
+
+# %% [markdown]
+# ### 5.1 Load Raw Datasets
 
 # %%
 # 1. Load Raw Datasets
 raw_train_ds = tf.keras.utils.image_dataset_from_directory(
-    training_path,
+    TRAINING_PATH,
     labels='inferred',
     label_mode='categorical',
-    color_mode=color_mode,
+    color_mode=COLOR_MODE,
     batch_size=32,
-    image_size=target_size,
+    image_size=TARGET_SIZE,
     shuffle=True,
     seed=42,
     interpolation='lanczos3'
 )
 
 raw_val_ds = tf.keras.utils.image_dataset_from_directory(
-    validation_path,
+    VALIDATION_PATH,
     labels='inferred',
     label_mode='categorical',
-    color_mode=color_mode,
+    color_mode=COLOR_MODE,
     batch_size=32,
-    image_size=target_size,
+    image_size=TARGET_SIZE,
     shuffle=False,
     interpolation='lanczos3'
 )
 
-# Capture class names for label decoding
-class_names = raw_train_ds.class_names
+# %% [markdown]
+# ### 5.2 Preprocessing and Augmentation Pipeline
 
+# %%
 # 2. Define Preprocessing/Augmentation Pipeline
 augmentation_layers = tf.keras.Sequential([
-    tf.keras.layers.RandomRotation(factor=40/360, fill_mode='nearest'), # rotation_range=40
-    tf.keras.layers.RandomZoom(height_factor=0.2, width_factor=0.2, fill_mode='nearest'), # zoom_range=0.2
+  tf.keras.layers.RandomRotation(factor=40/360, fill_mode='nearest'), # rotation_range=40
+  tf.keras.layers.RandomZoom(height_factor=0.2, width_factor=0.2, fill_mode='nearest'), # zoom_range=0.2
 ])
 
 rescaling_layer = tf.keras.layers.Rescaling(1./255)
@@ -384,99 +446,100 @@ def prepare_dataset(ds, augment=False):
 train_generator = prepare_dataset(raw_train_ds, augment=True)
 validation_generator = prepare_dataset(raw_val_ds)
 
+# %% [markdown]
+# ## 6. Model Configuration
+
+# %% [markdown]
+# ### 6.1 Training Parameters
+
 # %%
-n_epoch = 25
-input_shape = target_size + shape_add
-learning_rate = 0.0001
-optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-# tf.keras.optimizers.SGD(learning_rate=learning_rate)
+N_EPOCH = 25
+INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
+LEARNING_RATE = 0.0001
+OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)
+# tf.keras.optimizers.SGD(learning_rate=LEARNING_RATE)
 
-auc_value = tf.keras.metrics.AUC(
-                                  # name='AUC values',
-                                  num_thresholds=200,
-                                  curve='ROC',
-                                  summation_method='interpolation',
-                                  # threshold=0.5,
-                                  multi_label=True)
+AUC_VALUE = tf.keras.metrics.AUC(num_thresholds=200, curve='ROC', summation_method='interpolation', multi_label=True)
 
-precision_score = tf.keras.metrics.Precision(name='precision')
-recall_score = tf.keras.metrics.Recall(name='recall')
+PRECISION_SCORE = tf.keras.metrics.Precision(name='precision')
+RECALL_SCORE = tf.keras.metrics.Recall(name='recall')
 
-model_path = 'Trained_Models/ODIR5K-Multi-Class-bottleneck/'
-checkpoint_path = model_path + 'ODIR5K.keras'
-checkpoint_dir = os.path.dirname(checkpoint_path)
+MODEL_PATH = 'Trained_Models/ODIR5K-Multi-Class-bottleneck/'
+CHECKPOINT_PATH = MODEL_PATH + 'ODIR5K.keras'
+CHECKPOINT_DIR = os.path.dirname(CHECKPOINT_PATH)
 
-model_save_weights = 'weight'
-model_save_name_h5 = 'ODIR5K.h5'
-model_save_name_tf = 'ODIR5K_TF'
+MODEL_SAVE_WEIGHTS = 'weight'
+MODEL_SAVE_NAME_H5 = 'ODIR5K.h5'
+MODEL_SAVE_NAME_TF = 'ODIR5K_TF'
 
-use_training_model = True
+USE_TRAINING_MODEL = True
 
-if (os.path.isfile(model_path + model_save_name_h5) or os.path.exists(model_path + model_save_name_tf)) and use_training_model:
-  # if os.path.exists(model_path+model_save_name_tf):
+if (os.path.isfile(MODEL_PATH + MODEL_SAVE_NAME_H5) or os.path.exists(MODEL_PATH + MODEL_SAVE_NAME_TF)) and USE_TRAINING_MODEL:
+  # if os.path.exists(MODEL_PATH + MODEL_SAVE_NAME_TF):
   #   print("Using tf")
-  #   model = tf.keras.models.load_model(model_path+model_save_name_tf)
-  if os.path.isfile(model_path + model_save_name_h5):
+  #   model = tf.keras.models.load_model(MODEL_PATH + MODEL_SAVE_NAME_TF)
+  if os.path.isfile(MODEL_PATH + MODEL_SAVE_NAME_H5):
     print("Using h5")
-    model = tf.keras.models.load_model(model_path + model_save_name_h5)
+    model = tf.keras.models.load_model(MODEL_PATH + MODEL_SAVE_NAME_H5)
   # model.summary()
   output = model.output
 else:
   print("No using saved model")
-  model = tf.keras.models.Sequential([
-    tf.keras.Input(shape=input_shape),
-    tf.keras.layers.Conv2D(32, (3,3), activation='relu'),
-    tf.keras.layers.Conv2D(32, (3,3), activation='relu'),
-    tf.keras.layers.MaxPooling2D(2, 2),
-    tf.keras.layers.BatchNormalization(),
-    # The second convolution
-    tf.keras.layers.Conv2D(64, (3,3), activation='relu'),
-    tf.keras.layers.Conv2D(64, (3,3), activation='relu'),
-    tf.keras.layers.MaxPooling2D(2,2),
-    tf.keras.layers.BatchNormalization(),
-    # The third convolution
-    tf.keras.layers.Conv2D(128, (3,3), activation='relu'),
-    tf.keras.layers.Conv2D(128, (3,3), activation='relu'),
-    tf.keras.layers.MaxPooling2D(2,2),
-    tf.keras.layers.BatchNormalization(),
-    # The fourth convolution
-    tf.keras.layers.Conv2D(256, (3,3), activation='relu'),
-    tf.keras.layers.Conv2D(256, (3,3), activation='relu'),
-    tf.keras.layers.MaxPooling2D(2,2),
-    tf.keras.layers.BatchNormalization(),
 
-    tf.keras.layers.Flatten(),
-    tf.keras.layers.Dense(256, activation='relu'),
-    tf.keras.layers.Dense(64, activation='relu'),
-    tf.keras.layers.BatchNormalization(),
-    # tf.keras.layers.Dropout(0.2),
-    tf.keras.layers.Dense(8, activation='softmax')
+  def create_conv_block(filters, kernel_size=(3,3), activation='relu'):
+    return [
+      tf.keras.layers.Conv2D(filters, kernel_size, activation=activation),
+      tf.keras.layers.Conv2D(filters, kernel_size, activation=activation),
+      tf.keras.layers.MaxPooling2D(2, 2),
+      tf.keras.layers.BatchNormalization()
+    ]
+
+  # Build model using convolutional blocks
+  model = tf.keras.models.Sequential([
+      tf.keras.Input(shape=INPUT_SHAPE),
   ])
-  # model.compile(loss = 'categorical_crossentropy', optimizer=optimizer, metrics=['accuracy'])
+
+  # Add convolutional blocks with increasing filter sizes
+  for filters in [32, 64, 128, 256]:
+    model.add(create_conv_block(filters))
+
+  # Add dense layers
+  model.add(tf.keras.layers.Flatten())
+  model.add(tf.keras.layers.Dense(256, activation='relu'))
+  model.add(tf.keras.layers.Dense(64, activation='relu'))
+  model.add(tf.keras.layers.BatchNormalization())
+  # tf.keras.layers.Dropout(0.2),
+  model.add(tf.keras.layers.Dense(8, activation='softmax'))
 
 model.summary(line_length=100)
 model.compile(loss='categorical_crossentropy',
-              optimizer=optimizer,
-              metrics=['accuracy', precision_score, recall_score, auc_value])
+              optimizer=OPTIMIZER,
+              metrics=['accuracy', PRECISION_SCORE, RECALL_SCORE, AUC_VALUE])
+
+# %% [markdown]
+# ### 6.2 Callback Configuration
 
 # %%
 checkpoint_path = "Trained_Models/ODIR5K-Multi-Class/ODIR5K.keras"
 checkpoint_dir = os.path.dirname(checkpoint_path)
 
-cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
-                                                #  save_weights_only=True,
-                                                 verbose=1)
+cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path, verbose=1)
 
-stop_accuracy = 0.900
+STOP_ACCURACY = 0.900
 
-# Define a Callback class that stops training once accuracy reaches the certain accuracy
 class CallbackStop(tf.keras.callbacks.Callback):
   def on_epoch_end(self, epoch, logs={}):
-    if(logs.get('accuracy') > stop_accuracy):
-      print("Reached", stop_accuracy * 100, "accuracy so cancelling training!")
+    if(logs.get('accuracy') > STOP_ACCURACY):
+      print("Reached", STOP_ACCURACY * 100, "accuracy so cancelling training!")
       self.model.stop_training = True
 
 callback_stop = CallbackStop()
+
+# %% [markdown]
+# ## 7. Model Training
+
+# %% [markdown]
+# ### 7.1 Train the Model
 
 # %%
 history = model.fit(train_generator, validation_data=validation_generator,
@@ -486,28 +549,38 @@ history = model.fit(train_generator, validation_data=validation_generator,
                     # steps_per_epoch = train_generator.samples // train_generator.batch_size,
                     # validation_steps = validation_generator.samples // validation_generator.batch_size,
                     verbose=1,
-                    callbacks=[callback_stop,
-                              #  cp_callback
-                               ])
+                    callbacks=[callback_stop]) # cp_callback
+
+# %% [markdown]
+# ## 8. Model Saving
+
+# %% [markdown]
+# ### 8.1 Save Trained Model
 
 # %%
-model_path = 'Trained_Models/ODIR5K-Multi-Class-bottleneck/'
-checkpoint_path = model_path + 'ODIR5K.ckpt'
-checkpoint_dir = os.path.dirname(checkpoint_path)
+MODEL_PATH = 'Trained_Models/ODIR5K-Multi-Class-bottleneck/'
+CHECKPOINT_PATH = MODEL_PATH + 'ODIR5K.ckpt'
+CHECKPOINT_DIR = os.path.dirname(CHECKPOINT_PATH)
 
-model_save_weights = 'weight'
-model_save_name_h5 = 'ODIR5K.h5'
-model_save_name_tf = 'ODIR5K_TF'
-model.save_weights(model_path)
-model.save_weights(model_path + model_save_weights)
-model.save(model_path)
-model.save(model_path + model_save_name_h5)
-model.save(model_path + model_save_name_tf, save_format='tf')
+MODEL_SAVE_WEIGHTS = 'weight'
+MODEL_SAVE_NAME_H5 = 'ODIR5K.h5'
+MODEL_SAVE_NAME_TF = 'ODIR5K_TF'
+model.save_weights(MODEL_PATH)
+model.save_weights(MODEL_PATH + MODEL_SAVE_WEIGHTS)
+model.save(MODEL_PATH)
+model.save(MODEL_PATH + MODEL_SAVE_NAME_H5)
+model.save(MODEL_PATH + MODEL_SAVE_NAME_TF, save_format='tf')
 
 # %%
-converter = tf.lite.TFLiteConverter.from_saved_model(model_path)
+converter = tf.lite.TFLiteConverter.from_saved_model(MODEL_PATH)
 tflite_model = converter.convert()
-open(model_path + "ODIR5K.tflite", "wb").write(tflite_model)
+open(MODEL_PATH + "ODIR5K.tflite", "wb").write(tflite_model)
+
+# %% [markdown]
+# ## 9. Model Evaluation
+
+# %% [markdown]
+# ### 9.1 Plot Training Results
 
 # %%
 acc = history.history['accuracy']
@@ -559,24 +632,28 @@ plt.figure()
 
 plt.show()
 
-# %%
-# model_path = 'Trained_Models/ODIR5K-Multi-Class-bottleneck/'
-# model_save_name_h5 = 'ODIR5K.h5'
-# model = tf.keras.models.load_model(model_path + model_save_name_h5)
+# %% [markdown]
+# ### 9.2 Label Decoding Function
 
 # %%
-label_keys = class_names
-label_values = list(range(len(class_names)))
-
 def get_key_indices(val):
+  class_names = raw_train_ds.class_names
+  label_keys = class_names
+  label_values = list(range(len(class_names)))
   return label_keys[label_values.index(val)]
 
+# %% [markdown]
+# ## 10. Model Testing
+
+# %% [markdown]
+# ### 10.1 Test on Sample Images
+
 # %%
-test_list = os.listdir(testing_path)
+test_list = os.listdir(TESTING_PATH)
 test_list.sort()
 
-for i_file in range(0, len(test_list), 50):
-  img = image.load_img(testing_path + test_list[i_file], target_size=target_size,)
+for i in range(0, len(test_list), 50):
+  img = image.load_img(TESTING_PATH + test_list[i], target_size=TARGET_SIZE)
   img_plot = plt.imshow(img)
   img_array = image.img_to_array(img)
   img_array = np.expand_dims(img_array, axis=0)
@@ -585,15 +662,15 @@ for i_file in range(0, len(test_list), 50):
   classes = model.predict(images, batch_size=8)
   # probability_model = tf.keras.Sequential([model, tf.keras.layers.Softmax()])
   # classes = probability_model.predict(images,batch_size=10)
-  print("File:", testing_path + test_list[i_file]," | predicted as:", get_key_indices(np.argmax(classes)), "at:", np.argmax(classes))
+  print("File:", TESTING_PATH + test_list[i]," | predicted as:", get_key_indices(np.argmax(classes)), "at:", np.argmax(classes))
 
 # %%
-test_list = os.listdir(testing_path)
+test_list = os.listdir(TESTING_PATH)
 
 test_list.sort()
 
-for i_file in range(0, 10):
-  img = image.load_img(testing_path + test_list[i_file], target_size=target_size)
+for i in range(0, 10):
+  img = image.load_img(TESTING_PATH + test_list[i], target_size=TARGET_SIZE)
   img_plot = plt.imshow(img)
   img_array = image.img_to_array(img)
   img_array = np.expand_dims(img_array, axis=0)
@@ -602,56 +679,22 @@ for i_file in range(0, 10):
   classes = model.predict(images, batch_size=8)
   probability_model = tf.keras.Sequential([model, tf.keras.layers.Softmax()])
   classes = probability_model.predict(images,batch_size=8)
-  print("File:", testing_path + test_list[i_file], " | predicted as:", get_key_indices(np.argmax(classes)), "at:", np.argmax(classes), classes)
+  print("File:", TESTING_PATH + test_list[i], " | predicted as:", get_key_indices(np.argmax(classes)), "at:", np.argmax(classes), classes)
+
+# %% [markdown]
+# ### 10.2 Model Evaluation
 
 # %%
 model.evaluate(validation_generator)
 
-# %%
-model.predict('ODIR-5K/testing/1000_left.jpg')
+# %% [markdown]
+# ### 10.3 Batch Prediction Testing
 
 # %%
-# for i_file in test_list:
-img = tf.keras.preprocessing.image.load_img('ODIR-5K/testing/1604_left.jpg', target_size=target_size)
-img_plot = plt.imshow(img)
-img_array = tf.keras.preprocessing.image.img_to_array(img)
-img_array = np.expand_dims(img_array, axis=0)
+test_list = os.listdir(TESTING_PATH)
 
-images = np.vstack([img_array])
-classes = model.predict_classes(images)
-print(classes)
-probability_model = tf.keras.Sequential([model, tf.keras.layers.Softmax()])
-classes = probability_model.predict(images)
-print(classes)
-print("File:", testing_path + test_list[300])
-print("Predicted as:", np.argmax(classes))
-# np.argmax((probability_model.predict(images) > 0.5).astype("int32"))
-
-# %%
-# for i_file in test_list:
-img = tf.keras.preprocessing.image.load_img('ODIR-5K/validation/Abnormalities/1031_left.jpg', target_size=target_size,)
-# img = tf.keras.preprocessing.image.load_img('/ODIR-5K/training/Diabetes/1022_left.jpg', target_size=target_size)
-img_plot = plt.imshow(img)
-img_array = tf.keras.preprocessing.image.img_to_array(img)
-img_array = np.expand_dims(img_array, axis=0)
-
-images = np.vstack([img_array])
-classes = model.predict(images)
-probability_model = tf.keras.Sequential([model, tf.keras.layers.Softmax()])
-classes = probability_model.predict(images)
-print("File:", testing_path + test_list[300])
-print("Predicted as:", np.argmax(classes))
-
-# %%
-predict_fun = model.make_predict_function
-
-model.predict(images)
-
-# %%
-test_list = os.listdir(testing_path)
-
-for i_file in test_list:
-  img = tf.keras.preprocessing.image.load_img(testing_path + i_file, target_size=target_size)
+for i in test_list:
+  img = tf.keras.preprocessing.image.load_img(TESTING_PATH + i, target_size=TARGET_SIZE)
   # img_plot = plt.imshow(img)
   img_array = tf.keras.preprocessing.image.img_to_array(img)
   img_array = np.expand_dims(img_array, axis=0)
@@ -660,21 +703,5 @@ for i_file in test_list:
   classes = model.predict(images, batch_size=8)
   # probability_model = tf.keras.Sequential([model, tf.keras.layers.Softmax()])
   # classes = probability_model.predict(images, batch_size=10)
-  print("File:", testing_path + i_file," | predicted as:", get_key_indices(np.argmax(classes)), "at:", np.argmax(classes), " | x", np.argmax((model.predict(images) > 0.05).astype("int32")))
+  print("File:", TESTING_PATH + i, " | predicted as:", get_key_indices(np.argmax(classes)), "at:", np.argmax(classes), " | x", np.argmax((model.predict(images) > 0.05).astype("int32")))
   # print("Predicted as: ", classes)
-
-# %%
-test_dir = 'ODIR-5K/testing/'
-
-print(len(os.listdir(testing_path)))
-
-# test_datagen = ImageDataGenerator(rescale=1./255)
-# test_generator = test_datagen.flow_from_directory(test_dir, target_size=target_size, color_mode="rgb", shuffle=False, class_mode='categorical', batch_size=1)
-
-# filenames = test_generator.filenames
-# nb_samples = len(filenames)
-
-# predict = model.predict_generator(test_generator)
-# np.argmax(predict[0])
-# for i in range (500):
-#   print(np.argmax(predict[i]))

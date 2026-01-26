@@ -1,5 +1,11 @@
 # %% [markdown]
-# # Set Dependencies
+# # ODIR-5K Multi-Label Classification Pipeline
+
+# %% [markdown]
+# ## 1. Setup and Dependencies
+
+# %% [markdown]
+# ### 1.1 Import Libraries
 
 # %%
 import os
@@ -17,14 +23,20 @@ print(tf.__version__)
 os.chdir('ODIR-5K')
 
 # %% [markdown]
-# # Data Preprocessing
+# ## 2. Data Loading and Preprocessing
+
+# %% [markdown]
+# ### 2.1 Load Dataset
 
 # %%
 from pandas import read_excel
 
-file_name = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
-df = read_excel(file_name)
+FILE_NAME = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
+df = read_excel(FILE_NAME)
 print(df.head())
+
+# %% [markdown]
+# ### 2.2 Extract and Process Diagnostic Keywords
 
 # %%
 left_eye_keywords = df['Left-Diagnostic Keywords'].copy()
@@ -36,7 +48,7 @@ right_eye_keywords = right_eye_keywords.str.split("，").apply(lambda x: list(se
 print(left_eye_keywords[2])
 
 # %% [markdown]
-# ## Set the different keyword diagnosis label
+# ### 2.3 MultiLabelBinarizer Setup
 
 # %%
 mlb = MultiLabelBinarizer()
@@ -48,7 +60,10 @@ all_diagnosis = list(mlb.classes_)
 print("Total different keys diagnosis:", len(all_diagnosis))
 
 # %% [markdown]
-# ## Get keywords from single label
+# ## 3. Keyword Analysis and Processing
+
+# %% [markdown]
+# ### 3.1 Extract Single-Label Keywords
 
 # %%
 test_df = df.copy()
@@ -58,19 +73,19 @@ diag_cols = test_df.columns[7:]
 double_diagnosis_row = test_df[test_df[diag_cols].sum(axis=1) > 1].index.tolist()
 
 def get_key_diagnosis_single(col_name):
-	# Get other diagnosis columns
-	other_diag_cols = [col for col in diag_cols if col != col_name]
+    # Get other diagnosis columns
+    other_diag_cols = [col for col in diag_cols if col != col_name]
 
-	# Find rows where target column == 1 AND all other diagnosis columns == 0
-	single_rows = test_df[(test_df[col_name] == 1) & (test_df[other_diag_cols].sum(axis=1) == 0)].index
+    # Find rows where target column == 1 AND all other diagnosis columns == 0
+    single_rows = test_df[(test_df[col_name] == 1) & (test_df[other_diag_cols].sum(axis=1) == 0)].index
 
-	# Collect unique keywords from left and right eye for these rows
-	key_diagnosis = []
-	for row in single_rows:
-		key_diagnosis.extend(left_eye_keywords[row])
-		key_diagnosis.extend(right_eye_keywords[row])
+    # Collect unique keywords from left and right eye for these rows
+    key_diagnosis = []
+    for row in single_rows:
+        key_diagnosis.extend(left_eye_keywords[row])
+        key_diagnosis.extend(right_eye_keywords[row])
 
-	return list(set(key_diagnosis))
+    return list(set(key_diagnosis))
 
 key_normal = get_key_diagnosis_single(test_df.columns[7])
 key_diabetes = get_key_diagnosis_single(test_df.columns[8])
@@ -81,13 +96,16 @@ key_hypertension = get_key_diagnosis_single(test_df.columns[12])
 key_myopia = get_key_diagnosis_single(test_df.columns[13])
 key_other_disease = get_key_diagnosis_single(test_df.columns[14])
 
-label_string = ['Normal', 'Diabetes', 'Glaucoma', 'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Abnormalities']
+LABEL_STRINGS = ['Normal', 'Diabetes', 'Glaucoma', 'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Abnormalities']
 key_all = [key_normal, key_diabetes, key_glaucoma, key_cataract, key_amd, key_hypertension, key_myopia, key_other_disease]
 
 for i in range(8):
-	print(label_string[i], len(key_all[i]))
+    print(LABEL_STRINGS[i], len(key_all[i]))
 
 print(key_normal)
+
+# %% [markdown]
+# ### 3.2 Remove Duplicate Keywords
 
 # %%
 key_all_sets = [set(keywords) for keywords in key_all]
@@ -111,11 +129,14 @@ for i in range(len(key_all_sets)):
 # Print results
 print("Intersect by normal:")
 for i in range(len(key_all)):
-    print(label_string[i], len(key_all[i]))
+  print(LABEL_STRINGS[i], len(key_all[i]))
 
 print("Intersect by other:")
 for i in range(len(key_all)):
-    print(label_string[i], len(key_all[i]))
+  print(LABEL_STRINGS[i], len(key_all[i]))
+
+# %% [markdown]
+# ### 3.3 Get All Recognized Keywords
 
 # %%
 def get_all_recognized_key(key_all):
@@ -129,9 +150,12 @@ def get_all_recognized_key(key_all):
 all_key_diagnosis = get_all_recognized_key(key_all)
 print("Total unique keywords:", len(all_key_diagnosis))
 
+# %% [markdown]
+# ### 3.4 Process Double Diagnosis Rows
+
 # %%
 double_diagnosis_row = list(set(double_diagnosis_row))
-print("Double lablel row", len(double_diagnosis_row))
+print("Double label row", len(double_diagnosis_row))
 double_diagnosis_row.sort()
 
 # %%
@@ -153,7 +177,7 @@ not_listed = list(not_listed)
 print("Not listed diagnosis key:", len(not_listed))
 
 # %% [markdown]
-# ## Get keywords from multilabel
+# ### 3.5 Get Keywords from Multi-Label
 
 # %%
 def intersect_from_multi_label(keyword_groups):
@@ -198,7 +222,7 @@ while processing_required:
         processing_required = False
 
 # %% [markdown]
-# ## Add non recognized label to a label with the likelihood of approaching
+# ### 3.6 Add Non-Recognized Labels
 
 # %%
 #Manual listing key
@@ -218,72 +242,87 @@ print(key_all[4])
 string = 'central serous chorioretinopathy'
 print(string in key_other_disease)
 
+# %% [markdown]
+# ## 4. Path Configuration
+
 # %%
 # Set path
-training_source_path = 'ODIR-5K_Training_Images/'
-testing_source_path = 'ODIR-5K_Tesing_Images/'
+TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images/'
+TESTING_SOURCE_PATH = 'ODIR-5K_Tesing_Images/'
 
 # %% [markdown]
-# ## Image processing
+# ## 5. Image Processing Functions
+
+# %% [markdown]
+# ### 5.1 Image Resize and CLAHE Enhancement
 
 # %%
-# Define method for image resize, croping and image Contrast Limited Adaptive Histogram Equalization (CLAHE)
+# Define method for image resize, cropping and image Contrast Limited Adaptive Histogram Equalization (CLAHE)
 # using Opencv 4
 
 def image_resize(image_path, dim):
-	img = cv2.imread(image_path)
-	if img.shape[1] != img.shape[0]:
-		x = img.shape[1] // 2
-		y = img.shape[0] // 2
-		x = x-y
-		img = img[0:0 + img.shape[0], x:x + img.shape[0]]
-	return cv2.resize(img, dim, interpolation = cv2.INTER_AREA)
+    img = cv2.imread(image_path)
+    if img.shape[1] != img.shape[0]:
+        x = img.shape[1] // 2
+        y = img.shape[0] // 2
+        x = x-y
+        img = img[0:0 + img.shape[0], x:x + img.shape[0]]
+    return cv2.resize(img, dim, interpolation = cv2.INTER_AREA)
 
 def CLAHE(image_path, dim, clipLimit, tileGridSize):
-	img = image_resize(image_path, dim)
-	clahe = cv2.createCLAHE(clipLimit=clipLimit, tileGridSize=tileGridSize)
-	lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)  # convert from BGR to LAB color space
-	l, a, b = cv2.split(lab)  # split on 3 different channels
-	l2 = clahe.apply(l)  # apply CLAHE to the L-channel
-	lab = cv2.merge((l2,a,b))  # merge channels
-	img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)  # convert from LAB to BGR
-	img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-	return img
+    img = image_resize(image_path, dim)
+    clahe = cv2.createCLAHE(clipLimit=clipLimit, tileGridSize=tileGridSize)
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)  # convert from BGR to LAB color space
+    l, a, b = cv2.split(lab)  # split on 3 different channels
+    l2 = clahe.apply(l)  # apply CLAHE to the L-channel
+    lab = cv2.merge((l2,a,b))  # merge channels
+    img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)  # convert from LAB to BGR
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    return img
+
+# %% [markdown]
+# ### 5.2 Image Configuration
 
 # %%
 # Set target size image
-target_size = (230, 230)
-# color_mode = 'grayscale'
-color_mode = 'rgb'
-shape_add = (3,)  # Default to RGB
-
-if color_mode == 'grayscale':
-	shape_add = (1,)
-elif color_mode == 'rgb':
-	shape_add = (3,)
+TARGET_SIZE = (230, 230)
+# COLOR_MODE = 'grayscale'
+COLOR_MODE = 'rgb'
+SHAPE_ADD = (3,)  # Default to RGB
+if COLOR_MODE == 'grayscale':
+	SHAPE_ADD = (1,)
+elif COLOR_MODE == 'rgb':
+	SHAPE_ADD = (3,)
 
 # %% [markdown]
-# ## Synthetizing the label for single image
+# ## 6. Label Synthesis Functions
+
+# %% [markdown]
+# ### 6.1 Label Generation Functions
 
 # %%
 # Function for generate label to single image
 
 # Return index in key of all diagnosis list
 def get_index_label(key, key_all):
-	for i in key_all:
-		if key in i:
-			return key_all.index(i)
+    for i in key_all:
+        if key in i:
+            return key_all.index(i)
 
 # Return multilabel by index
 def get_multi_label_from_keys(idx_label):
-	tmp_label = []
-	for i in range(8):
-		if i in idx_label:
-			tmp_label.append(1)
-		else:
-			tmp_label.append(0)
-	return tmp_label
+    tmp_label = []
+    for i in range(8):
+        if i in idx_label:
+            tmp_label.append(1)
+        else:
+            tmp_label.append(0)
+    return tmp_label
 
+# %% [markdown]
+# ### 6.2 Parallel Image Processing
+
+# %%
 import concurrent.futures
 from functools import partial
 
@@ -343,7 +382,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         left_eye_keywords=left_eye_keywords,
         right_eye_keywords=right_eye_keywords,
         key_all=key_all,
-        target_size=target_size
+        target_size=TARGET_SIZE
     )
 
     futures = [executor.submit(process_func, i) for i in range(len(df))]
@@ -357,7 +396,10 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
                 clahe_images.append(clahe_img)
 
 # %% [markdown]
-# ## Split feature, label, and file name for training, validation and test
+# ## 7. Data Splitting
+
+# %% [markdown]
+# ### 7.1 Train-Validation-Test Split
 
 # %%
 from sklearn.model_selection import train_test_split
@@ -380,35 +422,42 @@ del tmp_validation_labels
 del tmp_validation_filenames
 
 # %% [markdown]
-# ## Show some image for training
+# ### 7.2 Visualize Sample Images
+
+# %% [markdown]
+# #### 7.2.1 Training Images
 
 # %%
 f, ax = plt.subplots(2, 5)
 f.set_size_inches(10, 10)
 for idx in range(10):
     i, j = divmod(idx, 5)
-    if color_mode == 'rgb':
-        ax[i,j].imshow(training_features[idx].reshape(target_size[0], target_size[1], 3), cmap="hsv")
+    if COLOR_MODE == 'rgb':
+        ax[i,j].imshow(training_features[idx].reshape(TARGET_SIZE[0], TARGET_SIZE[1], 3), cmap="hsv")
     else:
-        ax[i,j].imshow(training_features[idx].reshape(target_size[0], target_size[1]), cmap="gray")
+        ax[i,j].imshow(training_features[idx].reshape(TARGET_SIZE[0], TARGET_SIZE[1]), cmap="gray")
 
 plt.tight_layout()
 
 # %% [markdown]
-# ## Show some image for validation
+# #### 7.2.2 Validation Images
 
 # %%
 f, ax = plt.subplots(2, 5)
 f.set_size_inches(10, 10)
 for idx in range(10):
     i, j = divmod(idx, 5)
-    ax[i,j].imshow(validation_features[idx].reshape(target_size[0], target_size[1], 3), cmap="hsv")
+    ax[i,j].imshow(validation_features[idx].reshape(TARGET_SIZE[0], TARGET_SIZE[1], 3), cmap="hsv")
 
 plt.tight_layout()
 
 # %% [markdown]
-# ## Set image data generator for training
+# ## 8. Data Generator Setup
 
+# %% [markdown]
+# ### 8.1 Preprocessing and Augmentation Pipeline
+
+# %%
 # 1. Define Preprocessing/Augmentation Pipeline
 augmentation_layers = tf.keras.Sequential([
     tf.keras.layers.RandomRotation(factor=30/360, fill_mode='nearest'), # rotation_range=30
@@ -438,210 +487,199 @@ train_generator = prepare_dataset(training_features, training_labels, augment=Tr
 validation_generator = prepare_dataset(validation_features, validation_labels)
 
 # %% [markdown]
-# # Train
+# ## 9. Model Training
 
 # %% [markdown]
-# ## Set callback method
+# ### 9.1 Callback Configuration
 
-checkpoint_path = "Trained_Models/ODIR5K-Multi-Label/ODIR5K.keras"
-checkpoint_dir = os.path.dirname(checkpoint_path)
+# %%
+CHECKPOINT_PATH_MULTI_LABEL = "Trained_Models/ODIR5K-Multi-Label/ODIR5K.keras"
+CHECKPOINT_DIR_MULTI_LABEL = os.path.dirname(CHECKPOINT_PATH_MULTI_LABEL)
 
-cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
-												 # save_weights_only=True,
-												 verbose=1)
+cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=CHECKPOINT_PATH_MULTI_LABEL, verbose=1)
 
-stop_val_auc = 0.8200
-stop_accuracy = 0.90
-stop_val_accuracy = 0.90
+STOP_VAL_AUC = 0.8200
+STOP_ACCURACY = 0.90
+STOP_VAL_ACCURACY = 0.90
 
 # Define a Callback class that stops training once accuracy reaches the certain accuracy
 class CallbackStop(tf.keras.callbacks.Callback):
-	def on_epoch_end(self, epoch, logs={}):
-		if(logs.get('accuracy_multilabel', 0.0) > stop_accuracy or logs.get('val_accuracy_multilabel', 0.0) > stop_val_accuracy):
-			print(f"Reached accuracy threshold ({stop_accuracy}) or validation accuracy threshold ({stop_val_accuracy}) so cancelling training!")
-			self.model.stop_training = True
+    def on_epoch_end(self, epoch, logs={}):
+        if(logs.get('accuracy_multilabel', 0.0) > STOP_ACCURACY or logs.get('val_accuracy_multilabel', 0.0) > STOP_VAL_ACCURACY):
+            print(f"Reached accuracy threshold ({STOP_ACCURACY}) or validation accuracy threshold ({STOP_VAL_ACCURACY}) so cancelling training!")
+            self.model.stop_training = True
 
 callback_stop = CallbackStop()
 
 # %% [markdown]
-# ## Set metric for training
+# ### 9.2 Metrics Configuration
 
-auc_value = tf.keras.metrics.AUC(name='auc_value',
-                                  # num_thresholds=200,
-                                  curve='ROC',
-                                  summation_method='interpolation',
-                                  # thresholds=0.5,
-                                  multi_label=True)
+# %%
+AUC_VALUE = tf.keras.metrics.AUC(name='auc_value', curve='ROC', summation_method='interpolation', multi_label=True)
 
-precision_score = tf.keras.metrics.Precision(thresholds=0.5, name='precision')
-recall_score = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
+PRECISION_SCORE = tf.keras.metrics.Precision(thresholds=0.5, name='precision')
+RECALL_SCORE = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
+
+# %% [markdown]
+# ### 9.3 Accuracy Function
 
 # %%
 @tf.function
 def accuracy_multilabel(y, y_hat):
-	correct_prediction = tf.equal(tf.round(y_hat), tf.cast(y, tf.float32))
-	# correct_prediction = tf.equal(tf.round(tf.nn.sigmoid(y_hat)), tf.round(y))
-	# mean
-	correct_prediction = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-	# all
-	# all_labels_true = tf.reduce_min(tf.cast(correct_prediction, tf.float32), 1)
-	# correct_prediction = tf.reduce_mean(all_labels_true)
-	return correct_prediction
+    correct_prediction = tf.equal(tf.round(y_hat), tf.cast(y, tf.float32))
+    # correct_prediction = tf.equal(tf.round(tf.nn.sigmoid(y_hat)), tf.round(y))
+    # mean
+    correct_prediction = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+    # all
+    # all_labels_true = tf.reduce_min(tf.cast(correct_prediction, tf.float32), 1)
+    # correct_prediction = tf.reduce_mean(all_labels_true)
+    return correct_prediction
 
 # %% [markdown]
-# ## set loss function for training
-
-@tf.function
-def multilabel_cross_entropy(y, y_hat):
-	# cross_entropy = -tf.reduce_sum(((y * tf.math.log(y_hat + 1e-9)) + ((1-y) * tf.math.log(1 - y_hat + 1e-9)) ), name='xentropy')
-	# cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(labels=y, logits=y_hat, name="sigmoid_cross_entropy_with_logits")
-	cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(logits=y_hat, labels=tf.cast(y,tf.float32))
-	loss = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=1))
-	return loss
-
-# %% [markdown]
-# ## Define Model
+# ### 9.4 Loss Function
 
 # %%
-use_model = "using custom"
-
-if (use_model == "using custom"):
-	model_path = 'Trained_Models/ODIR-5K-VGG16_like-Multi-Label/'
-
-	inputs = tf.keras.Input(shape=target_size + shape_add)
-	# The first convolution
-	conn = tf.keras.layers.Conv2D(32, (3,3), activation='relu')(inputs)
-	conn = tf.keras.layers.Conv2D(32, (3,3), activation='relu')(conn)
-	conn = tf.keras.layers.MaxPooling2D(2, 2)(conn)
-	conn = tf.keras.layers.BatchNormalization()(conn)
-	# conn = tf.keras.layers.Dropout(0.4)(conn)
-
-	# The second convolution
-	conn = tf.keras.layers.Conv2D(64, (3,3), activation='relu')(conn)
-	conn = tf.keras.layers.Conv2D(64, (3,3), activation='relu')(conn)
-	conn = tf.keras.layers.MaxPooling2D(2,2)(conn)
-	conn = tf.keras.layers.BatchNormalization()(conn)
-	# conn = tf.keras.layers.Dropout(0.4)(conn)
-
-	# The third convolution
-	conn = tf.keras.layers.Conv2D(128, (3,3), activation='relu')(conn)
-	conn = tf.keras.layers.Conv2D(128, (3,3), activation='relu')(conn)
-	conn = tf.keras.layers.MaxPooling2D(2,2)(conn)
-	conn = tf.keras.layers.BatchNormalization()(conn)
-	# conn = tf.keras.layers.Dropout(0.4)(conn)
-
-	# The fourth convolution
-	conn = tf.keras.layers.Conv2D(256, (3,3), activation='relu')(conn)
-	conn = tf.keras.layers.Conv2D(256, (3,3), activation='relu')(conn)
-	conn = tf.keras.layers.MaxPooling2D(2,2)(conn)
-	# conn = tf.keras.layers.Dropout(0.4)(conn)
-	conn = tf.keras.layers.BatchNormalization()(conn)
-
-	conn = tf.keras.layers.Flatten()(conn)
-	conn = tf.keras.layers.Dense(256, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(conn)
-	conn = tf.keras.layers.BatchNormalization()(conn)
-	# conn = tf.keras.layers.Dropout(0.4)(conn)
-	conn = tf.keras.layers.Dense(128, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(conn)
-	conn = tf.keras.layers.BatchNormalization()(conn)
-	# conn = tf.keras.layers.Dropout(0.4)(conn)
-	# conn = tf.keras.layers.Dense(96, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(conn)
-	# conn = tf.keras.layers.BatchNormalization()(conn)
-	# conn = tf.keras.layers.Dropout(0.2)(conn)
-	conn = tf.keras.layers.Dense(64, activation='relu',
-	# kernel_regularizer=tf.keras.regularizers.l2(0.001)
-	)(conn)
-	# conn = tf.keras.layers.Dropout(0.4)(conn)
-	conn = tf.keras.layers.Dense(8, activation='sigmoid')(conn)
+@tf.function
+def multilabel_cross_entropy(y, y_hat):
+    # cross_entropy = -tf.reduce_sum(((y * tf.math.log(y_hat + 1e-9)) + ((1-y) * tf.math.log(1 - y_hat + 1e-9)) ), name='xentropy')
+    # cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(labels=y, logits=y_hat, name="sigmoid_cross_entropy_with_logits")
+    cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(logits=y_hat, labels=tf.cast(y,tf.float32))
+    loss = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=1))
+    return loss
 
 # %% [markdown]
-# training dataset
+# ### 9.5 Model Architecture
 
-use_training_model = False
+# %%
+USE_MODEL = "using custom"
 
-checkpoint_path = model_path + 'ODIR5K.keras'
-checkpoint_dir = os.path.dirname(checkpoint_path)
-model_save_weights = 'weight'
-model_save_name_h5 = 'ODIR5K.h5'
-model_save_name_tf = 'ODIR5K_TF'
-model_save_name_js = 'ODIR5K_TFJS'
+if (USE_MODEL == "using custom"):
+    from tensorflow.keras.layers import Conv2D, MaxPooling2D, BatchNormalization, Flatten, Dense
+    model_path = 'Trained_Models/ODIR-5K-VGG16_like-Multi-Label/'
 
-n_epoch = 25
-input_shape = target_size + shape_add
-learning_rate = 1e-4
-loss = "binary_crossentropy"
-optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+    inputs = tf.keras.Input(shape=TARGET_SIZE + SHAPE_ADD)
+    # The first convolution
+    conn = Conv2D(32, (3,3), activation='relu')(inputs)
+    conn = Conv2D(32, (3,3), activation='relu')(conn)
+    conn = MaxPooling2D(2, 2)(conn)
+    conn = BatchNormalization()(conn)
 
-if (os.path.isfile(model_path + model_save_name_h5) or os.path.exists(model_path + model_save_name_tf)) and use_training_model:
-	if os.path.isfile(model_path + model_save_name_h5):
-		print("Using h5")
-		model = tf.keras.models.load_model(model_path + model_save_name_h5)
-	output = model.output
+    # The second convolution
+    conn = Conv2D(64, (3,3), activation='relu')(conn)
+    conn = Conv2D(64, (3,3), activation='relu')(conn)
+    conn = MaxPooling2D(2,2)(conn)
+    conn = BatchNormalization()(conn)
+
+    # The third convolution
+    conn = Conv2D(128, (3,3), activation='relu')(conn)
+    conn = Conv2D(128, (3,3), activation='relu')(conn)
+    conn = MaxPooling2D(2,2)(conn)
+    conn = BatchNormalization()(conn)
+
+    # The fourth convolution
+    conn = Conv2D(256, (3,3), activation='relu')(conn)
+    conn = Conv2D(256, (3,3), activation='relu')(conn)
+    conn = MaxPooling2D(2,2)(conn)
+    conn = BatchNormalization()(conn)
+
+    conn = Flatten()(conn)
+    conn = Dense(256, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(conn)
+    conn = BatchNormalization()(conn)
+    conn = Dense(128, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(conn)
+    conn = BatchNormalization()(conn)
+    conn = Dense(64, activation='relu')(conn)
+    conn = Dense(8, activation='sigmoid')(conn)
+
+# %% [markdown]
+# ### 9.6 Model Training Configuration
+
+# %%
+USE_TRAINING_MODEL = False
+
+CHECKPOINT_PATH = model_path + 'ODIR5K.keras'
+CHECKPOINT_DIR = os.path.dirname(CHECKPOINT_PATH)
+MODEL_SAVE_WEIGHTS = 'weight'
+MODEL_SAVE_NAME_H5 = 'ODIR5K.h5'
+MODEL_SAVE_NAME_TF = 'ODIR5K_TF'
+MODEL_SAVE_NAME_JS = 'ODIR5K_TFJS'
+
+N_EPOCH = 25
+INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
+LEARNING_RATE = 1e-4
+LOSS = "binary_crossentropy"
+OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)
+
+if (os.path.isfile(model_path + MODEL_SAVE_NAME_H5) or os.path.exists(model_path + MODEL_SAVE_NAME_TF)) and USE_TRAINING_MODEL:
+    if os.path.isfile(model_path + MODEL_SAVE_NAME_H5):
+        print("Using h5")
+        model = tf.keras.models.load_model(model_path + MODEL_SAVE_NAME_H5)
+    output = model.output
 else:
-	print("No using saved model")
-	if (use_model == "using custom"):
-		model = tf.keras.Model(inputs=inputs, outputs=conn)
+    print("No using saved model")
+    if (USE_MODEL == "using custom"):
+        model = tf.keras.Model(inputs=inputs, outputs=conn)
 
 model.summary(line_length=100)
-model.compile(loss='binary_crossentropy',
-              # macro_soft_f1, # not suitable loss for multilabel
-              # npairs_multilabel_loss, #cannot use in this model
-              # hamming_loss_func
-			  optimizer=optimizer,
-			  metrics=[accuracy_multilabel, auc_value, precision_score, recall_score])
+model.compile(loss=LOSS,
+              optimizer=OPTIMIZER,
+              metrics=[accuracy_multilabel, AUC_VALUE, PRECISION_SCORE, RECALL_SCORE])
+
+# %% [markdown]
+# ### 9.7 Train the Model
 
 # %%
 history = model.fit(train_generator,
-					validation_data=validation_generator,
-					epochs=50,
-					verbose=1,
-					callbacks=[callback_stop])
+                    validation_data=validation_generator,
+                    epochs=50,
+                    verbose=1,
+                    callbacks=[callback_stop])
 
 # %% [markdown]
-# # Evaluate
+# ## 10. Model Evaluation
 
 # %% [markdown]
-# ## Validation test trained model
+# ### 10.1 Validation Test
 
 # %%
-training_path = training_source_path
 output = tf.metrics.MultiLabelConfusionMatrix(num_classes=8)
-print("file name", "\t\t\t\t\t", "true label", "\t\t", "prediction label","\t", "accuracy score")
+print("file name", "\t\t\t\t\t", "true label", "\t\t", "prediction label", "\t", "accuracy score")
 count_true = 0
 count_half = 0
 count_zero = 0
 for i in range(0, len(validation_test_filenames)):
-	source = training_path + validation_test_filenames[i]
-	img = CLAHE(source, target_size, 20, (10,10))
-	img_array = tf.keras.preprocessing.image.img_to_array(img)
-	img_array = np.expand_dims(img_array, axis=0)
-	img_array = img_array/255.0
-	images = np.vstack([img_array])
-	predict = model.predict(images)
-	predict = predict.reshape(8)
-	predict = tf.cast(predict >= 0.5, np.int32)
-	y_true = tf.constant(validation_test_labels[i], dtype=tf.int32)
-	y_pred = tf.constant(predict.numpy(), dtype=tf.int32)
-	acc_ml = accuracy_multilabel(y_true, y_pred).numpy()
-	count_true = count_true + 1 if acc_ml == 1.0 else count_true
-	count_half = count_half + 1 if 0.75 <= acc_ml < 1 and 1 in predict.numpy().tolist() else count_half
-	count_zero = count_zero + 1 if 1 not in predict.numpy().tolist() else count_zero
-	print("---------------------------------------------------------------------------------------------------")
-	print(source, "\t", validation_test_labels[i], "\t", predict.numpy(), "\t", acc_ml)
+    source = TRAINING_SOURCE_PATH + validation_test_filenames[i]
+    img = CLAHE(source, TARGET_SIZE, 20, (10,10))
+    img_array = tf.keras.preprocessing.image.img_to_array(img)
+    img_array = np.expand_dims(img_array, axis=0)
+    img_array = img_array/255.0
+    images = np.vstack([img_array])
+    predict = model.predict(images)
+    predict = predict.reshape(8)
+    predict = tf.cast(predict >= 0.5, np.int32)
+    y_true = tf.constant(validation_test_labels[i], dtype=tf.int32)
+    y_pred = tf.constant(predict.numpy(), dtype=tf.int32)
+    acc_ml = accuracy_multilabel(y_true, y_pred).numpy()
+    count_true = count_true + 1 if acc_ml == 1.0 else count_true
+    count_half = count_half + 1 if 0.75 <= acc_ml < 1 and 1 in predict.numpy().tolist() else count_half
+    count_zero = count_zero + 1 if 1 not in predict.numpy().tolist() else count_zero
+    print("---------------------------------------------------------------------------------------------------")
+    print(source, "\t", validation_test_labels[i], "\t", predict.numpy(), "\t", acc_ml)
 
-print('\n',"true:", count_true, "| half true:", count_half, "| zero:", count_zero)
+print("true:", count_true, "| half true:", count_half, "| zero:", count_zero)
 
 # %% [markdown]
-# ## Save the trained model
+# ### 10.2 Save Trained Model
 
+# %%
 model.save_weights(model_path)
-model.save_weights(model_path + model_save_weights)
+model.save_weights(model_path + MODEL_SAVE_WEIGHTS)
 model.save(model_path)
-model.save(model_path + model_save_name_h5)
-model.save(model_path + model_save_name_tf, save_format='tf')
+model.save(model_path + MODEL_SAVE_NAME_H5)
+model.save(model_path + MODEL_SAVE_NAME_TF, save_format='tf')
 
 # %%
 import tensorflowjs as tfjs
-tfjs.converters.save_keras_model(model, model_path + model_save_name_js)
+tfjs.converters.save_keras_model(model, model_path + MODEL_SAVE_NAME_JS)
 
 # %%
 converter = tf.lite.TFLiteConverter.from_saved_model(model_path)
@@ -649,7 +687,7 @@ tflite_model = converter.convert()
 open(model_path + "ODIR5K.tflite", "wb").write(tflite_model)
 
 # %% [markdown]
-# ## Plot the training and validation step
+# ### 10.3 Plot Training Results
 
 # %%
 precision = history.history['precision']
@@ -664,8 +702,8 @@ val_acc = history.history['val_accuracy_multilabel']
 loss = history.history['loss']
 val_loss = history.history['val_loss']
 
-auc = history.history['auc_value']
-val_auc = history.history['val_auc_value']
+auc = history.history['auc']
+val_auc = history.history['val_auc']
 
 epochs_training = range(1, len(acc) + 1)
 
@@ -705,18 +743,17 @@ plt.savefig(model_path + 'precision_recall.png')
 plt.show()
 
 # %% [markdown]
-# ## Testing model
+# ### 10.4 Testing Model
 
 # %%
-test_path = testing_source_path
-test_list = os.listdir(testing_source_path)
+test_list = os.listdir(TESTING_SOURCE_PATH)
 test_list.sort()
 for i in range(0, len(test_list), 5):
-	source = test_path + test_list[i]
-	img = CLAHE(source, target_size, 20, (10,10))
-	img_array = tf.keras.preprocessing.image.img_to_array(img)
-	img_array = np.expand_dims(img_array, axis=0)
-	images = np.vstack([img_array])/255
-	classes = model.predict(images)
-	classes = tf.cast(classes > 0.5, float)
-	print(source, classes)
+    source = TESTING_SOURCE_PATH + test_list[i]
+    img = CLAHE(source, TARGET_SIZE, 20, (10,10))
+    img_array = tf.keras.preprocessing.image.img_to_array(img)
+    img_array = np.expand_dims(img_array, axis=0)
+    images = np.vstack([img_array])/255
+    classes = model.predict(images)
+    classes = tf.cast(classes > 0.5, float)
+    print(source, classes)
