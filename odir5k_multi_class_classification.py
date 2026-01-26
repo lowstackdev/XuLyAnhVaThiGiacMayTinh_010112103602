@@ -9,12 +9,10 @@ from random import sample
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
-import sklearn
+from sklearn.preprocessing import MultiLabelBinarizer
 import tensorflow as tf
 import tensorflow.keras.optimizers
 from tensorflow.keras.preprocessing import image
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 print(tf.__version__)
 
@@ -32,62 +30,41 @@ print(df.head())
 left_eye_keywords = df['Left-Diagnostic Keywords'].copy()
 right_eye_keywords = df['Right-Diagnostic Keywords'].copy()
 
-# %%
 left_eye_keywords = left_eye_keywords.str.split("，").apply(lambda x: list(set(x)))
 right_eye_keywords = right_eye_keywords.str.split("，").apply(lambda x: list(set(x)))
 
-# %%
 print(left_eye_keywords[2])
 
 # %%
-from sklearn.preprocessing import MultiLabelBinarizer
-
 mlb = MultiLabelBinarizer()
 
-res = pd.DataFrame(mlb.fit_transform(right_eye_keywords),
-                   columns=mlb.classes_,
-                   index=right_eye_keywords.index)
+combined_keywords = pd.concat([left_eye_keywords, right_eye_keywords])
+mlb.fit(combined_keywords)
 
-all_diagnosis_left = res.columns.to_list()
-print(len(all_diagnosis_left))
-
-res = pd.DataFrame(mlb.fit_transform(left_eye_keywords),
-                   columns=mlb.classes_,
-                   index=left_eye_keywords.index)
-
-all_diagnosis_right = res.columns.to_list()
-print(len(all_diagnosis_right))
-
-all_diagnosis=list(set(all_diagnosis_left+all_diagnosis_right))
+all_diagnosis = list(mlb.classes_)
 print("Total different keys diagnosis:", len(all_diagnosis))
 
 # %%
 test_df = df.copy()
-double_diagnosis_row = []
+
+# Compute double_diagnosis_row once (rows with multiple diagnoses)
+diag_cols = test_df.columns[7:]
+double_diagnosis_row = test_df[test_df[diag_cols].sum(axis=1) > 1].index.tolist()
 
 def get_key_diagnosis_single(col_name):
-	key_diagnosis = []
-	global double_diagnosis_row
-	store = True
-	for row in range(len(test_df[col_name])):
-		store = True
-		if test_df[col_name][row] == 1:
-			for lable in test_df.columns[7:]:
-				if lable == col_name:
-					continue
-				if test_df[lable][row] == 1:
-					double_diagnosis_row.append(row)
-					store = False
-					break
+  # Get other diagnosis columns
+  other_diag_cols = [col for col in diag_cols if col != col_name]
 
-			if store == True:
-				for i in right_eye_keywords[row]:
-					key_diagnosis.append(i)
-				for i in left_eye_keywords[row]:
-					key_diagnosis.append(i)
+  # Find rows where target column == 1 AND all other diagnosis columns == 0
+  single_rows = test_df[(test_df[col_name] == 1) & (test_df[other_diag_cols].sum(axis=1) == 0)].index
 
-	key_diagnosis = list(set(key_diagnosis))
-	return key_diagnosis
+  # Collect unique keywords from left and right eye for these rows
+  key_diagnosis = []
+  for row in single_rows:
+      key_diagnosis.extend(left_eye_keywords[row])
+      key_diagnosis.extend(right_eye_keywords[row])
+
+  return list(set(key_diagnosis))
 
 key_normal = get_key_diagnosis_single(test_df.columns[7])
 key_diabetes = get_key_diagnosis_single(test_df.columns[8])
@@ -107,181 +84,123 @@ for i in range(8):
 print(key_normal)
 
 # %%
+key_all_sets = [set(keywords) for keywords in key_all]
+
+# Remove "normal" keyword from all groups
+normal_keywords = key_all_sets[0]
+for i in range(1, len(key_all_sets)):
+  key_all_sets[i] -= normal_keywords
+
+# Remove duplicate keywords between groups
+for i in range(len(key_all_sets)):
+  for j in range(i+1, len(key_all_sets)):
+    # Find intersection and remove from the group with higher index
+    intersection = key_all_sets[i] & key_all_sets[j]
+    key_all_sets[j] -= intersection
+
+# Convert back to list
+for i in range(len(key_all_sets)):
+  key_all[i] = list(key_all_sets[i])
+
+# Print results
 print("Intersect by normal:")
-for i in range(1,len(key_all)):
-  key_all[i] = list(set(key_all[i]) - set(key_all[0]))
-
-for i in range(8):
-  print(label_string[i], len(key_all[i]))
-
-print("\nIntersect by other:")
 for i in range(len(key_all)):
-  for j in range(i,len(key_all)):
-    if i == j:
-      continue
-    else:
-      key_all[i] = list(set(key_all[i]) - set(key_all[j]))
+  print(label_string[i], len(key_all[i]))
 
-for i in range(8):
+print("Intersect by other:")
+for i in range(len(key_all)):
   print(label_string[i], len(key_all[i]))
 
 # %%
-def get_all_recognized_key(m_key_all):
-  mall_key_diagnosis = []
-  for i in range(len(m_key_all)):
-    m_key_all[i] = list(set(m_key_all[i]))
-    mall_key_diagnosis = mall_key_diagnosis + list(set(m_key_all[i]))
-  return mall_key_diagnosis
+def get_all_recognized_key(key_all):
+    key_all_copy = [list(set(keywords)) for keywords in key_all]
+    all_keywords = []
+    for keywords in key_all_copy:
+        all_keywords.extend(keywords)
 
-# %%
-key_normal, key_diabetes, key_glaucoma, key_cataract, key_amd, key_hypertension, key_myopia, key_other_disease = key_all[0], key_all[1], key_all[2], key_all[3], key_all[4], key_all[5], key_all[6], key_all[7]
+    return list(set(all_keywords))
 
 all_key_diagnosis = get_all_recognized_key(key_all)
-print(len(all_key_diagnosis))
+print("Total unique keywords:", len(all_key_diagnosis))
 
 # %%
 double_diagnosis_row = list(set(double_diagnosis_row))
-print("Double lablel row:",len(double_diagnosis_row))
+print("Double lablel row:", len(double_diagnosis_row))
 double_diagnosis_row.sort()
-# double_diagnosis_row
 
 # %%
-not_listed = []
-listed = False
-for row in double_diagnosis_row:
-  # print(row)
-  for i_list in left_eye_keywords[row]:
-    # print(i_list)
-    listed = False
-    for j in key_all:
-      if i_list in j:
-        listed = True
-        break
-    if listed == False:
-      not_listed.append(i_list)
+all_known_keywords = set()
+for keywords in key_all:
+  all_known_keywords.update(keywords)
+not_listed = set()
 
 for row in double_diagnosis_row:
-  for i_list in right_eye_keywords[row]:
-    listed = False
-    for j in key_all:
-      if i_list in j:
-        listed = True
-        break
-    if listed == False:
-      not_listed.append(i_list)
+  for keyword in left_eye_keywords[row]:
+    if keyword not in all_known_keywords:
+      not_listed.add(keyword)
 
-not_listed = list(set(not_listed))
-# not_listed
+  for keyword in right_eye_keywords[row]:
+    if keyword not in all_known_keywords:
+      not_listed.add(keyword)
+
+not_listed = list(not_listed)
 print("Not listed diagnosis key:", len(not_listed))
 
 # %%
-def intersect_from_multi_label(m_key_all):
-  m_not_recognized_list = []
-  mall_key_diagnosis = []
-  for i in range(len(m_key_all)):
-    m_key_all[i] = list(set(m_key_all[i]))
-    mall_key_diagnosis = mall_key_diagnosis + list(set(m_key_all[i]))
-  for row in double_diagnosis_row:
-    not_listed_list = []
-    listed_list = []
-    col_index = []
-    ind = []
-    temp_list = []
-    for i_list in left_eye_keywords[row]:
-      if i_list not in mall_key_diagnosis:
-        temp_list.append(i_list)
-    for i_list in right_eye_keywords[row]:
-      if i_list not in mall_key_diagnosis:
-        temp_list.append(i_list)
+def intersect_from_multi_label(keyword_groups):
+  known_keywords = set()
+  for disease_keywords in keyword_groups:
+    known_keywords.update(disease_keywords)
+  unrecognized_keywords = set()
 
-    for i in range(7, len(test_df.columns)):
-      if test_df[test_df.columns[i]][row] == 1:
-        col_index.append(i - 7)
-    temp_list = list(set(temp_list))
-    is_contain_abnormal = 7 in col_index
-    if len(temp_list) > 0:
-      ind = col_index
-      for i_list in left_eye_keywords[row]:
-        if i_list not in temp_list:
-          listed_list.append(i_list)
-      for i_list in right_eye_keywords[row]:
-        if i_list not in temp_list:
-          listed_list.append(i_list)
+  for record_index in double_diagnosis_row:
+    undiscovered_keywords = set()
+    for keyword in left_eye_keywords[record_index] + right_eye_keywords[record_index]:
+      if keyword not in known_keywords:
+        undiscovered_keywords.add(keyword)
 
-      for i_list in listed_list:
-        for i in col_index:
-          if i_list in key_normal:
-            continue
-          if i_list in m_key_all[i]:
-            ind.remove(i)
+    if undiscovered_keywords:
+      related_disease_groups = []
+      for column_index in range(7, len(test_df.columns)):
+        if test_df[test_df.columns[column_index]][record_index] == 1:
+          related_disease_groups.append(column_index - 7)
 
-      if len(ind) == 0 and is_contain_abnormal:
-        ind.append(7)
-      if len(ind) == 1 and len(temp_list) == 1:
-        m_key_all[ind[0]] = m_key_all[ind[0]] + temp_list
-        m_key_all[ind[0]] = list(set(m_key_all[ind[0]]))
+      if len(related_disease_groups) == 1 and len(undiscovered_keywords) == 1:
+        disease_group_index = related_disease_groups[0]
+        new_keyword = undiscovered_keywords.pop()
+        keyword_groups[disease_group_index].append(new_keyword)
+        known_keywords.add(new_keyword)
       else:
-        print("Not recognize")
-        m_not_recognized_list.append(temp_list[0])
-        m_not_recognized_list = list(set(m_not_recognized_list))
+          unrecognized_keywords.update(undiscovered_keywords)
 
-    mall_key_diagnosis = []
-    for i in m_key_all:
-      mall_key_diagnosis = mall_key_diagnosis+list(set(i))
-  return m_key_all, m_not_recognized_list
+  return keyword_groups, list(unrecognized_keywords)
 
-# %%
-iterate = True
-not_recognized_list = []
-while iterate :
-  temp_all_key_diagnosis = all_key_diagnosis.copy()
-  key_all, not_recognized_list = intersect_from_multi_label(key_all)
+processing_required = True
+unrecognized_keywords_list = []
+
+while processing_required:
+  previous_keyword_count = len(all_key_diagnosis)
+  key_all, unrecognized_keywords_list = intersect_from_multi_label(key_all)
   all_key_diagnosis = get_all_recognized_key(key_all)
-  # print(len(temp_all_key_diagnosis), len(all_key_diagnosis))
-  print(not_recognized_list)
-  if len(temp_all_key_diagnosis) == len(all_key_diagnosis):
+  print(unrecognized_keywords_list)
+  current_keyword_count = len(all_key_diagnosis)
+  if current_keyword_count == previous_keyword_count:
     print(True)
-    iterate = False
+    processing_required = False
 
 # %%
-all_key_diagnosis = get_all_recognized_key(key_all)
+#manual listing key
+keywords_to_process = [('suspected cataract', 3)]
+for keyword, disease_group_index in keywords_to_process:
+    if keyword in unrecognized_keywords_list and keyword not in all_key_diagnosis:
+        key_all[disease_group_index].append(keyword)
+        unrecognized_keywords_list.remove(keyword)
 
-key_normal, key_diabetes, key_glaucoma, key_cataract, key_amd, key_hypertension, key_myopia, key_other_disease = key_all[0], key_all[1], key_all[2], key_all[3], key_all[4], key_all[5], key_all[6], key_all[7]
-
-for i in range(8):
-  print(label_string[i], len(key_all[i]))
-
-print("All regnized key:", len(all_key_diagnosis))
-print("Not recognized key:", list(set(all_diagnosis) - set(all_key_diagnosis)))
-
-# %%
-#manual listed key
-string = 'suspected cataract'
-if string in not_recognized_list and string not in all_key_diagnosis:
-  key_all[3].append(string)
-  not_recognized_list.remove(string)
-
-# %%
 print(key_all[3])
 
 # %%
-all_key_diagnosis = get_all_recognized_key(key_all)
-
-key_normal, key_diabetes, key_glaucoma, key_cataract, key_amd, key_hypertension, key_myopia, key_other_disease = key_all[0], key_all[1], key_all[2], key_all[3], key_all[4], key_all[5], key_all[6], key_all[7]
-
-for i in range(len(key_all)):
-  print(label_string[i], len(key_all[i]))
-
-print("All regnized key:", len(all_key_diagnosis))
-print("Not recognized key:", list(set(all_diagnosis)-set(all_key_diagnosis)))
-
-# %%
+[print("Not in:", keyword) for keyword in unrecognized_keywords_list if keyword not in all_key_diagnosis]
 string = 'central serous chorioretinopathy'
-
-for i in not_recognized_list:
-  if i not in all_key_diagnosis:
-    print("Not in:", i)
-
 print(string in key_other_disease)
 
 # %%
@@ -308,7 +227,7 @@ os.mkdir(test_dir)
 for i in label_string:
   os.mkdir(train_dir + '/' + i)
   os.mkdir(validation_dir + '/' + i)
-  os.mkdir(test_dir+'/'+i)
+  os.mkdir(test_dir + '/' + i)
 
 # %%
 testing_source_files = os.listdir(testing_source_path)
@@ -331,15 +250,15 @@ print(len(validation_files))
 print(len(testing_files))
 
 # %%
-temp_df = df['Left-Fundus']
-print(len(temp_df))
-print(temp_df[12])
-temp_df = df['Right-Fundus']
+tmp_df = df['Left-Fundus']
+print(len(tmp_df))
+print(tmp_df[12])
+tmp_df = df['Right-Fundus']
 print(right_eye_keywords[5])
 print(testing_files[1])
 
-temp_keywords = right_eye_keywords
-print(temp_keywords[12])
+tmp_keywords = right_eye_keywords
+print(tmp_keywords[12])
 
 # %%
 not_sorted_files = []
@@ -347,14 +266,14 @@ not_sorted_files = []
 for file_name in training_files:
   nrow = None
   if 'left' in file_name:
-    temp_df = df['Left-Fundus']
-    temp_keywords = left_eye_keywords
+    tmp_df = df['Left-Fundus']
+    tmp_keywords = left_eye_keywords
   elif 'right' in file_name:
-    temp_df = df['Right-Fundus']
-    temp_keywords = right_eye_keywords
+    tmp_df = df['Right-Fundus']
+    tmp_keywords = right_eye_keywords
 
-  for row in range(len(temp_df)):
-    if file_name == temp_df[row]:
+  for row in range(len(tmp_df)):
+    if file_name == tmp_df[row]:
       nrow = row
       break
 
@@ -363,7 +282,7 @@ for file_name in training_files:
     shutil.copyfile(training_source_path + file_name, training_path + file_name)
     continue
 
-  for i in temp_keywords[nrow]:
+  for i in tmp_keywords[nrow]:
     if i in key_normal:
       shutil.copyfile(training_source_path + file_name, training_path + 'Normal/' + file_name)
       continue
@@ -403,23 +322,23 @@ print(len(os.listdir(training_path + 'Cataract')))
 for file_name in validation_files:
   nrow = None
   if 'left' in file_name:
-    temp_df = df['Left-Fundus']
-    temp_keywords = left_eye_keywords
+    tmp_df = df['Left-Fundus']
+    tmp_keywords = left_eye_keywords
   elif 'right' in file_name:
-    temp_df = df['Right-Fundus']
-    temp_keywords = right_eye_keywords
+    tmp_df = df['Right-Fundus']
+    tmp_keywords = right_eye_keywords
 
-  for row in range(len(temp_df)):
-    if file_name == temp_df[row]:
+  for row in range(len(tmp_df)):
+    if file_name == tmp_df[row]:
       nrow = row
       break
 
   if nrow == None:
     # print("file not listed in data")
-    shutil.copyfile(training_source_path+file_name, validation_path+file_name)
+    shutil.copyfile(training_source_path + file_name, validation_path+file_name)
     continue
 
-  for i in temp_keywords[nrow]:
+  for i in tmp_keywords[nrow]:
     if i in key_normal:
       shutil.copyfile(training_source_path + file_name, validation_path + 'Normal/' + file_name)
       continue
@@ -458,23 +377,23 @@ print(len(os.listdir(validation_path + 'Cataract')))
 for file_name in testing_files:
   nrow = None
   if 'left' in file_name:
-    temp_df = df['Left-Fundus']
-    temp_keywords = left_eye_keywords
+    tmp_df = df['Left-Fundus']
+    tmp_keywords = left_eye_keywords
   if 'right' in file_name:
-    temp_df = df['Right-Fundus']
-    temp_keywords = right_eye_keywords
+    tmp_df = df['Right-Fundus']
+    tmp_keywords = right_eye_keywords
 
-  for row in range(len(temp_df)):
-    if file_name == temp_df[row]:
+  for row in range(len(tmp_df)):
+    if file_name == tmp_df[row]:
       nrow = row
       break
 
   if nrow == None:
     # print("file not listed in data")
-    shutil.copyfile(testing_source_path+file_name, testing_path+file_name)
+    shutil.copyfile(testing_source_path + file_name, testing_path + file_name)
     continue
 
-  for i in temp_keywords[nrow]:
+  for i in tmp_keywords[nrow]:
     if i in key_normal:
       shutil.copyfile(testing_source_path + file_name, testing_path + 'Normal/' + file_name)
       continue
@@ -513,12 +432,11 @@ print(len(os.listdir(testing_path)))
 print(not_sorted_files)
 
 # %%
-dir_list = os.listdir(training_path)
-countx = 0
-for i in dir_list:
-  countx+=len(os.listdir(training_path+i))
+from pathlib import Path
 
-print(countx)
+training_dir = Path(training_path)
+total_files = sum(len(list(subdir.glob('*'))) for subdir in training_dir.iterdir() if subdir.is_dir())
+print(total_files)
 
 print(len(os.listdir(training_source_path)))
 
@@ -584,13 +502,13 @@ augmentation_layers = tf.keras.Sequential([
 rescaling_layer = tf.keras.layers.Rescaling(1./255)
 
 def prepare_dataset(ds, augment=False):
-    # Apply rescaling to all
-    ds = ds.map(lambda x, y: (rescaling_layer(x), y), num_parallel_calls=tf.data.AUTOTUNE)
-    if augment:
-        # Apply augmentations only to training
-        ds = ds.map(lambda x, y: (augmentation_layers(x, training=True), y), num_parallel_calls=tf.data.AUTOTUNE)
-    # Enable caching and prefetching for high performance
-    return ds.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+  # Apply rescaling to all
+  ds = ds.map(lambda x, y: (rescaling_layer(x), y), num_parallel_calls=tf.data.AUTOTUNE)
+  if augment:
+    # Apply augmentations only to training
+    ds = ds.map(lambda x, y: (augmentation_layers(x, training=True), y), num_parallel_calls=tf.data.AUTOTUNE)
+  # Enable caching and prefetching for high performance
+  return ds.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
 
 train_generator = prepare_dataset(raw_train_ds, augment=True)
 validation_generator = prepare_dataset(raw_val_ds)
@@ -771,10 +689,6 @@ plt.figure()
 plt.show()
 
 # %%
-# import tensorflow as tf
-# import os
-# import numpy as np
-
 # model_path = 'Trained_Models/ODIR5K-Multi-Class-bottleneck/'
 # model_save_name_h5 = 'ODIR5K.h5'
 # model = tf.keras.models.load_model(model_path + model_save_name_h5)
@@ -817,7 +731,7 @@ for i_file in range(0, 10):
   classes = model.predict(images, batch_size=8)
   probability_model = tf.keras.Sequential([model, tf.keras.layers.Softmax()])
   classes = probability_model.predict(images,batch_size=8)
-  print("File:", testing_path+test_list[i_file]," | predicted as:", get_key_indices(np.argmax(classes)), "at:", np.argmax(classes), classes)
+  print("File:", testing_path + test_list[i_file], " | predicted as:", get_key_indices(np.argmax(classes)), "at:", np.argmax(classes), classes)
 
 # %%
 model.evaluate(validation_generator)
@@ -876,7 +790,7 @@ for i_file in test_list:
   # probability_model = tf.keras.Sequential([model, tf.keras.layers.Softmax()])
   # classes = probability_model.predict(images,batch_size=10)
   print("File:", testing_path + i_file," | predicted as:", get_key_indices(np.argmax(classes)), "at:", np.argmax(classes), " | x", np.argmax((model.predict(images) > 0.05).astype("int32")))
-  # print("predicted as : ", classes)
+  # print("predicted as: ", classes)
 
 # %%
 test_dir = 'ODIR-5K/testing/'
@@ -884,7 +798,6 @@ test_dir = 'ODIR-5K/testing/'
 print(len(os.listdir(testing_path)))
 
 # test_datagen = ImageDataGenerator(rescale=1./255)
-
 # test_generator = test_datagen.flow_from_directory(test_dir, target_size=target_size, color_mode="rgb", shuffle=False, class_mode='categorical', batch_size=1)
 
 # filenames = test_generator.filenames
