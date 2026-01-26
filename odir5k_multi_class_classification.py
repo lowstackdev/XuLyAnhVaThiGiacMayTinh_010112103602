@@ -295,29 +295,28 @@ if COLOR_MODE == 'rgb':
 # %%
 # 1. Load Raw Datasets
 raw_train_ds = tf.keras.utils.image_dataset_from_directory(
-    TRAINING_PATH,
-    labels='inferred',
-    label_mode='categorical',
-    color_mode=COLOR_MODE,
-    batch_size=32,
-    image_size=TARGET_SIZE,
-    shuffle=True,
-    seed=42,
-    interpolation='lanczos3'
+  TRAINING_PATH,
+  labels='inferred',
+  label_mode='categorical',
+  color_mode=COLOR_MODE,
+  batch_size=32,
+  image_size=TARGET_SIZE,
+  shuffle=True,
+  seed=42,
+  interpolation='lanczos3'
 )
 
 raw_val_ds = tf.keras.utils.image_dataset_from_directory(
-    VALIDATION_PATH,
-    labels='inferred',
-    label_mode='categorical',
-    color_mode=COLOR_MODE,
-    batch_size=32,
-    image_size=TARGET_SIZE,
-    shuffle=False,
-    interpolation='lanczos3'
+  VALIDATION_PATH,
+  labels='inferred',
+  label_mode='categorical',
+  color_mode=COLOR_MODE,
+  batch_size=32,
+  image_size=TARGET_SIZE,
+  shuffle=False,
+  interpolation='lanczos3'
 )
 
-# %%
 # 2. Define Preprocessing/Augmentation Pipeline
 augmentation_layers = tf.keras.Sequential([
   tf.keras.layers.RandomRotation(factor=40/360, fill_mode='nearest'), # rotation_range=40
@@ -417,11 +416,11 @@ model.save(MODEL_PATH + MODEL_SAVE_NAME_H5)
 
 # %%
 metrics = [
-    ('accuracy', 'accuracy', 0),
-    ('loss', 'loss', 1),
-    ('precision', 'Precision', 2),
-    ('auc', 'AUC value', 3),
-    ('recall', 'Recall', 4)
+  ('accuracy', 'accuracy', 0),
+  ('loss', 'loss', 1),
+  ('precision', 'Precision', 2),
+  ('auc', 'AUC value', 3),
+  ('recall', 'Recall', 4)
 ]
 epochs = range(1, len(history.history['accuracy']) + 1)
 for key, label, loc in metrics:
@@ -435,27 +434,21 @@ plt.show()
 # %%
 model.evaluate(validation_generator)
 
-def get_key_indices(val):
-  class_names = raw_train_ds.class_names
-  label_keys = class_names
-  label_values = list(range(len(class_names)))
-  return label_keys[label_values.index(val)]
-
 test_list = sorted(os.listdir(TESTING_PATH))
 probability_model = tf.keras.Sequential([model, tf.keras.layers.Softmax()])
 
 print(f"\nPredicting {len(test_list)} files in {TESTING_PATH}...")
 for file_name in test_list:
-    img_path = TESTING_PATH + file_name
-    img = image.load_img(img_path, target_size=TARGET_SIZE)
-    img_array = image.img_to_array(img)
-    img_array = np.expand_dims(img_array, axis=0)
+  img_path = TESTING_PATH + file_name
+  img = image.load_img(img_path, target_size=TARGET_SIZE)
+  img_array = image.img_to_array(img)
+  img_array = np.expand_dims(img_array, axis=0)
 
-    classes = model.predict(img_array, batch_size=8, verbose=0)
-    prob_classes = probability_model.predict(img_array, batch_size=8, verbose=0)
+  classes = model.predict(img_array, batch_size=8, verbose=0)
+  prob_classes = probability_model.predict(img_array, batch_size=8, verbose=0)
 
-    pred_idx = np.argmax(classes)
-    pred_label = get_key_indices(pred_idx)
-    x_idx = np.argmax((classes > 0.05).astype("int32"))
+  pred_idx = np.argmax(classes)
+  pred_label = raw_train_ds.class_names[pred_idx]
+  x_idx = np.argmax((classes > 0.05).astype("int32"))
 
-    print(f"File: {img_path} | predicted as: {pred_label} at: {pred_idx} | x: {x_idx} | probs: {prob_classes}")
+  print(f"File: {img_path} | predicted as: {pred_label} at: {pred_idx} | x: {x_idx} | probs: {prob_classes}")
