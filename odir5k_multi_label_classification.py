@@ -87,17 +87,9 @@ def get_key_diagnosis_single(col_name):
 
     return list(set(key_diagnosis))
 
-key_normal = get_key_diagnosis_single(test_df.columns[7])
-key_diabetes = get_key_diagnosis_single(test_df.columns[8])
-key_glaucoma = get_key_diagnosis_single(test_df.columns[9])
-key_cataract = get_key_diagnosis_single(test_df.columns[10])
-key_amd = get_key_diagnosis_single(test_df.columns[11])
-key_hypertension = get_key_diagnosis_single(test_df.columns[12])
-key_myopia = get_key_diagnosis_single(test_df.columns[13])
-key_other_disease = get_key_diagnosis_single(test_df.columns[14])
-
 LABEL_STRINGS = ['Normal', 'Diabetes', 'Glaucoma', 'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Abnormalities']
-key_all = [key_normal, key_diabetes, key_glaucoma, key_cataract, key_amd, key_hypertension, key_myopia, key_other_disease]
+key_all = [get_key_diagnosis_single(test_df.columns[7 + i]) for i in range(8)]
+key_normal, key_diabetes, key_glaucoma, key_cataract, key_amd, key_hypertension, key_myopia, key_other_disease = key_all
 
 for i in range(8):
     print(LABEL_STRINGS[i], len(key_all[i]))
@@ -516,7 +508,6 @@ callback_stop = CallbackStop()
 
 # %%
 AUC_VALUE = tf.keras.metrics.AUC(name='auc_value', curve='ROC', summation_method='interpolation', multi_label=True)
-
 PRECISION_SCORE = tf.keras.metrics.Precision(thresholds=0.5, name='precision')
 RECALL_SCORE = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
 
