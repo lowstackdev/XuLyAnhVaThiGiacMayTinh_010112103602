@@ -62,15 +62,9 @@ def get_key_diagnosis_single(col_name):
 
 LABEL_STRINGS = ['Normal', 'Diabetes', 'Glaucoma', 'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Abnormalities']
 key_all = [get_key_diagnosis_single(test_df.columns[7 + i]) for i in range(8)]
-key_normal, key_diabetes, key_glaucoma, key_cataract, key_amd, key_hypertension, key_myopia, key_other_disease = key_all
 
 for i in range(8):
   print(LABEL_STRINGS[i], len(key_all[i]))
-
-print(key_normal)
-
-# %% [markdown]
-# ### 2.2 Remove Duplicate Keywords
 
 # %%
 key_all_sets = [set(keywords) for keywords in key_all]
@@ -178,20 +172,6 @@ while processing_required:
     processing_required = False
 
 # %%
-keywords_to_process = [('suspected cataract', 3)]
-for keyword, disease_group_index in keywords_to_process:
-  if keyword in unrecognized_keywords_list and keyword not in all_key_diagnosis:
-    key_all[disease_group_index].append(keyword)
-    unrecognized_keywords_list.remove(keyword)
-
-print(key_all[3])
-
-# %%
-[print("Not in:", keyword) for keyword in unrecognized_keywords_list if keyword not in all_key_diagnosis]
-string = 'central serous chorioretinopathy'
-print(string in key_other_disease)
-
-# %%
 TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images/'
 TESTING_SOURCE_PATH = 'ODIR-5K_Testing_Images/'
 
@@ -229,17 +209,7 @@ print(len(testing_files))
 # %%
 def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
   "Organize eye images into diagnosis-specific directories based on keywords"
-  # Mapping from keywords to label directories and key lists
-  label_mapping = [
-    (key_normal, 'Normal'),
-    (key_diabetes, 'Diabetes'),
-    (key_glaucoma, 'Glaucoma'),
-    (key_cataract, 'Cataract'),
-    (key_amd, 'AMD'),
-    (key_hypertension, 'Hypertension'),
-    (key_myopia, 'Myopia'),
-    (key_other_disease, 'Abnormalities')
-  ]
+  label_mapping = list(zip(key_all, LABEL_STRINGS))
 
   for file_name in file_list:
     nrow = None
@@ -290,28 +260,28 @@ print(len(os.listdir(TESTING_PATH + 'Cataract')))
 print(len(os.listdir(TESTING_PATH)))
 
 # %%
-from pathlib import Path
+# from pathlib import Path
 
-training_dir = Path(TRAINING_PATH)
-total_files = sum(len(list(subdir.glob('*'))) for subdir in training_dir.iterdir() if subdir.is_dir())
-print(total_files)
+# training_dir = Path(TRAINING_PATH)
+# total_files = sum(len(list(subdir.glob('*'))) for subdir in training_dir.iterdir() if subdir.is_dir())
+# print(total_files)
 
-print(len(os.listdir(TRAINING_SOURCE_PATH)))
-
-# %%
-from PIL import Image
-
-cataract_image_list = os.listdir(TRAINING_PATH + 'Cataract')
-image_path = TRAINING_PATH + 'Cataract/' + cataract_image_list[2]
-im = Image.open(image_path)
-width, height = im.size
-print(width, height, "from", image_path)
+# print(len(os.listdir(TRAINING_SOURCE_PATH)))
 
 # %%
-img = image.load_img(image_path)
-plt.imshow(img)
-img = image.load_img(image_path, target_size=(int(height/16), int(width/16)), interpolation="lanczos")
-plt.imshow(img)
+# from PIL import Image
+
+# cataract_image_list = os.listdir(TRAINING_PATH + 'Cataract')
+# image_path = TRAINING_PATH + 'Cataract/' + cataract_image_list[2]
+# im = Image.open(image_path)
+# width, height = im.size
+# print(width, height, "from", image_path)
+
+# %%
+# img = image.load_img(image_path)
+# plt.imshow(img)
+# img = image.load_img(image_path, target_size=(int(height/16), int(width/16)), interpolation="lanczos")
+# plt.imshow(img)
 
 # %%
 TARGET_SIZE = (200, 300) # (int(height/16),int(width/16))
@@ -369,25 +339,25 @@ train_generator = prepare_dataset(raw_train_ds, augment=True)
 validation_generator = prepare_dataset(raw_val_ds)
 
 # %%
+USE_MODEL = "using custom"
+USE_PRETRAINED_MODEL = True
+INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
+
 N_EPOCH = 150
 LEARNING_RATE = 0.0001
-OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)
-# tf.keras.optimizers.SGD(learning_rate=LEARNING_RATE)
+OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE) # tf.keras.optimizers.SGD(learning_rate=LEARNING_RATE)
+
+MODEL_PATH = 'Trained_Models/ODIR5K-Multi-Class/'
+MODEL_SAVE_WEIGHTS = 'weight.h5'
+MODEL_SAVE_NAME_H5 = 'ODIR5K.h5'
+
+CHECKPOINT_PATH = MODEL_PATH + 'ODIR5K.keras'
 
 AUC_VALUE = tf.keras.metrics.AUC(num_thresholds=200, curve='ROC', summation_method='interpolation', multi_label=True)
 PRECISION_SCORE = tf.keras.metrics.Precision(name='precision')
 RECALL_SCORE = tf.keras.metrics.Recall(name='recall')
 
-MODEL_PATH = 'Trained_Models/ODIR5K-Multi-Class/'
-MODEL_SAVE_WEIGHTS = 'weight'
-MODEL_SAVE_NAME_H5 = 'ODIR5K.h5'
-MODEL_SAVE_NAME_TF = 'ODIR5K_TF'
-USE_TRAINING_MODEL = True
-
-CHECKPOINT_PATH_CALLBACK = "Trained_Models/ODIR5K-Multi-Class/ODIR5K.keras"
-STOP_ACCURACY = 0.900
-
-cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=CHECKPOINT_PATH_CALLBACK, verbose=1)
+STOP_ACCURACY = 0.90
 
 class CallbackStop(tf.keras.callbacks.Callback):
   def on_epoch_end(self, epoch, logs={}):
@@ -396,36 +366,35 @@ class CallbackStop(tf.keras.callbacks.Callback):
       self.model.stop_training = True
 
 callback_stop = CallbackStop()
+callback_cp = tf.keras.callbacks.ModelCheckpoint(filepath=CHECKPOINT_PATH, verbose=1)
 
-INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
-
-def create_conv_block(filters, kernel_size=(3,3), activation='relu'):
-    return [
-      tf.keras.layers.Conv2D(filters, kernel_size, activation=activation),
-      tf.keras.layers.Conv2D(filters, kernel_size, activation=activation),
-      tf.keras.layers.MaxPooling2D(2, 2),
-      tf.keras.layers.BatchNormalization()
-    ]
-
-if (os.path.isfile(MODEL_PATH + MODEL_SAVE_NAME_H5) or os.path.exists(MODEL_PATH + MODEL_SAVE_NAME_TF)) and USE_TRAINING_MODEL:
-  if os.path.isfile(MODEL_PATH + MODEL_SAVE_NAME_H5):
-    print("Using h5")
-    model = tf.keras.models.load_model(MODEL_PATH + MODEL_SAVE_NAME_H5)
-  output = model.output
+# %%
+if os.path.isfile(MODEL_PATH + MODEL_SAVE_NAME_H5) and USE_PRETRAINED_MODEL:
+  print("Using h5")
+  model = tf.keras.models.load_model(MODEL_PATH + MODEL_SAVE_NAME_H5)
 else:
   print("No using saved model")
-  model = tf.keras.models.Sequential([
+  if USE_MODEL == "using custom":
+    def create_conv_block(filters, kernel_size=(3,3), activation='relu'):
+      return [
+        tf.keras.layers.Conv2D(filters, kernel_size, activation=activation),
+        tf.keras.layers.Conv2D(filters, kernel_size, activation=activation),
+        tf.keras.layers.MaxPooling2D(2, 2),
+        tf.keras.layers.BatchNormalization()
+      ]
+
+    model = tf.keras.models.Sequential([
       tf.keras.Input(shape=INPUT_SHAPE),
-  ])
-
-  for filters in [32, 64, 128, 256]:
-    model.add(create_conv_block(filters))
-
-  model.add(tf.keras.layers.Flatten())
-  model.add(tf.keras.layers.Dense(256, activation='relu'))
-  model.add(tf.keras.layers.Dense(64, activation='relu'))
-  model.add(tf.keras.layers.BatchNormalization())
-  model.add(tf.keras.layers.Dense(8, activation='softmax'))
+      *create_conv_block(32),
+      *create_conv_block(64),
+      *create_conv_block(128),
+      *create_conv_block(256),
+      tf.keras.layers.Flatten(),
+      tf.keras.layers.Dense(256, activation='relu'),
+      tf.keras.layers.Dense(64, activation='relu'),
+      tf.keras.layers.BatchNormalization(),
+      tf.keras.layers.Dense(8, activation='softmax')
+    ])
 
 model.summary(line_length=100)
 model.compile(loss='categorical_crossentropy',
@@ -440,19 +409,11 @@ history = model.fit(train_generator, validation_data=validation_generator,
                     # steps_per_epoch = train_generator.samples // train_generator.batch_size,
                     # validation_steps = validation_generator.samples // validation_generator.batch_size,
                     verbose=1,
-                    callbacks=[callback_stop]) # cp_callback
+                    callbacks=[callback_stop]) # callback_cp
 
 # %%
-model.save_weights(MODEL_PATH)
 model.save_weights(MODEL_PATH + MODEL_SAVE_WEIGHTS)
-model.save(MODEL_PATH)
 model.save(MODEL_PATH + MODEL_SAVE_NAME_H5)
-model.save(MODEL_PATH + MODEL_SAVE_NAME_TF, save_format='tf')
-
-# %%
-converter = tf.lite.TFLiteConverter.from_saved_model(MODEL_PATH)
-tflite_model = converter.convert()
-open(MODEL_PATH + "ODIR5K.tflite", "wb").write(tflite_model)
 
 # %%
 metrics = [

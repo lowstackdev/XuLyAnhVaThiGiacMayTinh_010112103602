@@ -175,23 +175,6 @@ while processing_required:
         processing_required = False
 
 # %%
-keywords_to_process = [
-    ('suspected cataract', 3),
-    ('image offset', 4)
-]
-for keyword, disease_group_index in keywords_to_process:
-    if keyword in unrecognized_keywords_list and keyword not in all_key_diagnosis:
-        key_all[disease_group_index].append(keyword)
-        unrecognized_keywords_list.remove(keyword)
-
-print(key_all[4])
-
-# %%
-[print("Not in:", keyword) for keyword in unrecognized_keywords_list if keyword not in all_key_diagnosis]
-string = 'central serous chorioretinopathy'
-print(string in key_other_disease)
-
-# %%
 # Define method for image resize, cropping and image Contrast Limited Adaptive Histogram Equalization (CLAHE)
 # using Opencv 4
 
@@ -390,42 +373,35 @@ validation_generator = prepare_dataset(validation_features, validation_labels)
 
 # %%
 USE_MODEL = "using custom"
-MODEL_PATH = 'Trained_Models/ODIR-5K-VGG16_like-Multi-Label/'
+USE_PRETRAINED_MODEL = False
+INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
 
 N_EPOCH = 50
 LEARNING_RATE = 1e-4
 LOSS = "binary_crossentropy"
 OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)
 
-CHECKPOINT_PATH = MODEL_PATH + 'ODIR5K.keras'
-CHECKPOINT_DIR = os.path.dirname(CHECKPOINT_PATH)
-MODEL_SAVE_WEIGHTS = 'weight'
+MODEL_PATH = 'Trained_Models/ODIR-5K-Multi-Label/'
+MODEL_SAVE_WEIGHTS = 'weight.h5'
 MODEL_SAVE_NAME_H5 = 'ODIR5K.h5'
-MODEL_SAVE_NAME_TF = 'ODIR5K_TF'
-USE_TRAINING_MODEL = False
 
-INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
-
-CHECKPOINT_PATH_CALLBACK = "Trained_Models/ODIR5K-Multi-Label/ODIR5K.keras"
-STOP_ACCURACY = 0.90
-STOP_VAL_ACCURACY = 0.90
-
-cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=CHECKPOINT_PATH_CALLBACK, verbose=1)
-
-# Define a Callback class that stops training once accuracy reaches the certain accuracy
-class CallbackStop(tf.keras.callbacks.Callback):
-    def on_epoch_end(self, epoch, logs={}):
-        if(logs.get('accuracy_multilabel', 0.0) > STOP_ACCURACY or logs.get('val_accuracy_multilabel', 0.0) > STOP_VAL_ACCURACY):
-            print(f"Reached accuracy threshold ({STOP_ACCURACY}) or validation accuracy threshold ({STOP_VAL_ACCURACY}) so cancelling training!")
-            self.model.stop_training = True
-
-callback_stop = CallbackStop()
+CHECKPOINT_PATH = MODEL_PATH + 'ODIR5K.keras'
 
 AUC_VALUE = tf.keras.metrics.AUC(name='auc_value', curve='ROC', summation_method='interpolation', multi_label=True)
 PRECISION_SCORE = tf.keras.metrics.Precision(thresholds=0.5, name='precision')
 RECALL_SCORE = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
 
-# %%
+STOP_ACCURACY = 0.90
+
+class CallbackStop(tf.keras.callbacks.Callback):
+    def on_epoch_end(self, epoch, logs={}):
+        if(logs.get('accuracy') > STOP_ACCURACY):
+            print("Reached", STOP_ACCURACY * 100, "accuracy so cancelling training!")
+            self.model.stop_training = True
+
+callback_stop = CallbackStop()
+callback_cp = tf.keras.callbacks.ModelCheckpoint(filepath=CHECKPOINT_PATH, verbose=1)
+
 @tf.function
 def accuracy_multilabel(y, y_hat):
     correct_prediction = tf.equal(tf.round(y_hat), tf.cast(y, tf.float32))
@@ -437,7 +413,6 @@ def accuracy_multilabel(y, y_hat):
     # correct_prediction = tf.reduce_mean(all_labels_true)
     return correct_prediction
 
-# %%
 @tf.function
 def multilabel_cross_entropy(y, y_hat):
     # cross_entropy = -tf.reduce_sum(((y * tf.math.log(y_hat + 1e-9)) + ((1-y) * tf.math.log(1 - y_hat + 1e-9)) ), name='xentropy')
@@ -446,55 +421,51 @@ def multilabel_cross_entropy(y, y_hat):
     loss = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=1))
     return loss
 
-# Model Architecture
-if (USE_MODEL == "using custom"):
-    from tensorflow.keras.layers import Conv2D, MaxPooling2D, BatchNormalization, Flatten, Dense
-
-    inputs = tf.keras.Input(shape=INPUT_SHAPE)
-    # The first convolution
-    conn = Conv2D(32, (3,3), activation='relu')(inputs)
-    conn = Conv2D(32, (3,3), activation='relu')(conn)
-    conn = MaxPooling2D(2, 2)(conn)
-    conn = BatchNormalization()(conn)
-
-    # The second convolution
-    conn = Conv2D(64, (3,3), activation='relu')(conn)
-    conn = Conv2D(64, (3,3), activation='relu')(conn)
-    conn = MaxPooling2D(2,2)(conn)
-    conn = BatchNormalization()(conn)
-
-    # The third convolution
-    conn = Conv2D(128, (3,3), activation='relu')(conn)
-    conn = Conv2D(128, (3,3), activation='relu')(conn)
-    conn = MaxPooling2D(2,2)(conn)
-    conn = BatchNormalization()(conn)
-
-    # The fourth convolution
-    conn = Conv2D(256, (3,3), activation='relu')(conn)
-    conn = Conv2D(256, (3,3), activation='relu')(conn)
-    conn = MaxPooling2D(2,2)(conn)
-    conn = BatchNormalization()(conn)
-
-    conn = Flatten()(conn)
-    conn = Dense(256, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(conn)
-    conn = BatchNormalization()(conn)
-    conn = Dense(128, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(conn)
-    conn = BatchNormalization()(conn)
-    conn = Dense(64, activation='relu')(conn)
-    conn = Dense(8, activation='sigmoid')(conn)
-
-# Model Loading or Creation
-if (os.path.isfile(MODEL_PATH + MODEL_SAVE_NAME_H5) or os.path.exists(MODEL_PATH + MODEL_SAVE_NAME_TF)) and USE_TRAINING_MODEL:
-    if os.path.isfile(MODEL_PATH + MODEL_SAVE_NAME_H5):
-        print("Using h5")
-        model = tf.keras.models.load_model(MODEL_PATH + MODEL_SAVE_NAME_H5)
-    output = model.output
+# %%
+if os.path.isfile(MODEL_PATH + MODEL_SAVE_NAME_H5) and USE_PRETRAINED_MODEL:
+    print("Using h5")
+    model = tf.keras.models.load_model(MODEL_PATH + MODEL_SAVE_NAME_H5)
 else:
     print("No using saved model")
-    if (USE_MODEL == "using custom"):
-        model = tf.keras.Model(inputs=inputs, outputs=conn)
+    if USE_MODEL == "using custom":
+        from tensorflow.keras.layers import Conv2D, MaxPooling2D, BatchNormalization, Flatten, Dense
+        inputs = tf.keras.Input(shape=INPUT_SHAPE)
 
-# Model Compilation
+        # The first convolution block
+        x = Conv2D(32, (3,3), activation='relu')(inputs)
+        x = Conv2D(32, (3,3), activation='relu')(x)
+        x = MaxPooling2D(2, 2)(x)
+        x = BatchNormalization()(x)
+
+        # The second convolution block
+        x = Conv2D(64, (3,3), activation='relu')(x)
+        x = Conv2D(64, (3,3), activation='relu')(x)
+        x = MaxPooling2D(2,2)(x)
+        x = BatchNormalization()(x)
+
+        # The third convolution block
+        x = Conv2D(128, (3,3), activation='relu')(x)
+        x = Conv2D(128, (3,3), activation='relu')(x)
+        x = MaxPooling2D(2,2)(x)
+        x = BatchNormalization()(x)
+
+        # The fourth convolution block
+        x = Conv2D(256, (3,3), activation='relu')(x)
+        x = Conv2D(256, (3,3), activation='relu')(x)
+        x = MaxPooling2D(2,2)(x)
+        x = BatchNormalization()(x)
+
+        # Dense layers
+        x = Flatten()(x)
+        x = Dense(256, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(x)
+        x = BatchNormalization()(x)
+        x = Dense(128, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(x)
+        x = BatchNormalization()(x)
+        x = Dense(64, activation='relu')(x)
+        outputs = Dense(8, activation='sigmoid')(x)
+
+        model = tf.keras.Model(inputs=inputs, outputs=outputs)
+
 model.summary(line_length=100)
 model.compile(loss=LOSS,
               optimizer=OPTIMIZER,
@@ -508,53 +479,8 @@ history = model.fit(train_generator,
                     callbacks=[callback_stop])
 
 # %%
-model.save_weights(MODEL_PATH)
 model.save_weights(MODEL_PATH + MODEL_SAVE_WEIGHTS)
-model.save(MODEL_PATH)
 model.save(MODEL_PATH + MODEL_SAVE_NAME_H5)
-model.save(MODEL_PATH + MODEL_SAVE_NAME_TF, save_format='tf')
-
-# %%
-import tensorflowjs as tfjs
-MODEL_SAVE_NAME_JS = 'ODIR5K_TFJS'
-tfjs.converters.save_keras_model(model, MODEL_PATH + MODEL_SAVE_NAME_JS)
-
-# %%
-converter = tf.lite.TFLiteConverter.from_saved_model(MODEL_PATH)
-tflite_model = converter.convert()
-open(MODEL_PATH + "ODIR5K.tflite", "wb").write(tflite_model)
-
-# %%
-# Set path
-TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images/'
-TESTING_SOURCE_PATH = 'ODIR-5K_Tesing_Images/'
-
-# %%
-output = tf.metrics.MultiLabelConfusionMatrix(num_classes=8)
-print("file name", "\t\t\t\t\t", "true label", "\t\t", "prediction label", "\t", "accuracy score")
-count_true = 0
-count_half = 0
-count_zero = 0
-for i in range(0, len(validation_test_filenames)):
-    source = TRAINING_SOURCE_PATH + validation_test_filenames[i]
-    img = CLAHE(source, TARGET_SIZE, 20, (10,10))
-    img_array = tf.keras.preprocessing.image.img_to_array(img)
-    img_array = np.expand_dims(img_array, axis=0)
-    img_array = img_array/255.0
-    images = np.vstack([img_array])
-    predict = model.predict(images)
-    predict = predict.reshape(8)
-    predict = tf.cast(predict >= 0.5, np.int32)
-    y_true = tf.constant(validation_test_labels[i], dtype=tf.int32)
-    y_pred = tf.constant(predict.numpy(), dtype=tf.int32)
-    acc_ml = accuracy_multilabel(y_true, y_pred).numpy()
-    count_true = count_true + 1 if acc_ml == 1.0 else count_true
-    count_half = count_half + 1 if 0.75 <= acc_ml < 1 and 1 in predict.numpy().tolist() else count_half
-    count_zero = count_zero + 1 if 1 not in predict.numpy().tolist() else count_zero
-    print("---------------------------------------------------------------------------------------------------")
-    print(source, "\t", validation_test_labels[i], "\t", predict.numpy(), "\t", acc_ml)
-
-print("true:", count_true, "| half true:", count_half, "| zero:", count_zero)
 
 # %%
 metrics = [
@@ -574,6 +500,46 @@ for key, label, loc in metrics:
 plt.show()
 
 # %%
+TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images/'
+TESTING_SOURCE_PATH = 'ODIR-5K_Tesing_Images/'
+
+# output = tf.metrics.MultiLabelConfusionMatrix(num_classes=8)
+print("\nVALIDATION TEST RESULTS")
+print(f"{'File Name':<30} {'True Label':<15} {'Predicted':<15} {'Accuracy':<10}")
+
+count_true = 0
+count_half = 0
+count_zero = 0
+
+for i in range(len(validation_test_filenames)):
+    source = TRAINING_SOURCE_PATH + validation_test_filenames[i]
+    img = CLAHE(source, TARGET_SIZE, 20, (10,10))
+    img_array = tf.keras.preprocessing.image.img_to_array(img)
+    img_array = np.expand_dims(img_array, axis=0)
+    img_array = img_array/255.0
+    images = np.vstack([img_array])
+    predict = model.predict(images)
+    predict = predict.reshape(8)
+    predict = tf.cast(predict >= 0.5, np.int32)
+    y_true = tf.constant(validation_test_labels[i], dtype=tf.int32)
+    y_pred = tf.constant(predict.numpy(), dtype=tf.int32)
+    acc_ml = accuracy_multilabel(y_true, y_pred).numpy()
+
+    # Count results
+    count_true = count_true + 1 if acc_ml == 1.0 else count_true
+    count_half = count_half + 1 if 0.75 <= acc_ml < 1 and 1 in predict.numpy().tolist() else count_half
+    count_zero = count_zero + 1 if 1 not in predict.numpy().tolist() else count_zero
+
+    # Format and display results
+    filename = os.path.basename(source)
+    true_label = str(validation_test_labels[i])
+    predicted = str(predict.numpy())
+    accuracy = f"{acc_ml:.3f}"
+
+    print(f"{filename:<30} {true_label:<15} {predicted:<15} {accuracy:<10}")
+
+print(f"\nResults Summary: True: {count_true} | Half True: {count_half} | Zero: {count_zero}")
+
 test_list = os.listdir(TESTING_SOURCE_PATH)
 test_list.sort()
 for i in range(0, len(test_list), 5):
@@ -581,7 +547,7 @@ for i in range(0, len(test_list), 5):
     img = CLAHE(source, TARGET_SIZE, 20, (10,10))
     img_array = tf.keras.preprocessing.image.img_to_array(img)
     img_array = np.expand_dims(img_array, axis=0)
-    images = np.vstack([img_array])/255
+    images = np.vstack([img_array]) / 255
     classes = model.predict(images)
     classes = tf.cast(classes > 0.5, float)
     print(source, classes)
