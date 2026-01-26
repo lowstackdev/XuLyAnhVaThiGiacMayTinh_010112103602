@@ -317,7 +317,7 @@ augmentation_layers = tf.keras.Sequential([
 
   # 2. PHOTOMETRIC TRANSFORMATIONS (important)
   tf.keras.layers.RandomBrightness(
-      max_delta=0.15,  # 15% - not too large
+      factor=0.15,  # 15% - not too large
       value_range=(0, 1)  # Pixel values are already normalized
   ),
   tf.keras.layers.RandomContrast(
@@ -437,10 +437,8 @@ model.compile(loss='categorical_crossentropy',
 # %%
 history = model.fit(train_generator, validation_data=validation_generator,
                     epochs=N_EPOCH,
-                    steps_per_epoch=train_generator.samples//train_generator.batch_size,
-                    validation_steps=validation_generator.samples//validation_generator.batch_size,
-                    class_weights=class_weights,
                     verbose=1,
+                    class_weight=class_weights,
                     callbacks=callbacks)
 
 # %%

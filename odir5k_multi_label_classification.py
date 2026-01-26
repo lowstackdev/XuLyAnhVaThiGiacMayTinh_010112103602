@@ -327,7 +327,7 @@ display_image_samples(validation_features, "Validation Image Samples", COLOR_MOD
 augmentation_layers = tf.keras.Sequential([
     tf.keras.layers.RandomRotation(factor=0.0833, fill_mode='nearest'),  # ±30 degrees
     tf.keras.layers.RandomZoom(height_factor=0.15, width_factor=0.15, fill_mode='nearest'),
-    tf.keras.layers.RandomBrightness(max_delta=0.1),  # Adjust brightness
+    tf.keras.layers.RandomBrightness(factor=0.1),  # Adjust brightness
     tf.keras.layers.RandomContrast(factor=0.1),       # Adjust contrast
     tf.keras.layers.GaussianNoise(0.01),
 ])
