@@ -613,7 +613,7 @@ auc_value = tf.keras.metrics.AUC(
 precision_score = tf.keras.metrics.Precision(name='precision')
 recall_score = tf.keras.metrics.Recall(name='recall')
 
-model_path = 'Trained_Models/ODIR5K-bottleneck/'
+model_path = 'Trained_Models/ODIR5K-Multi-Class-bottleneck/'
 checkpoint_path = model_path + 'ODIR5K.keras'
 checkpoint_dir = os.path.dirname(checkpoint_path)
 
@@ -671,7 +671,7 @@ model.compile(loss='categorical_crossentropy',
               metrics=['accuracy', precision_score, recall_score, auc_value])
 
 # %%
-checkpoint_path = "Trained_Models/ODIR5K/ODIR5K.keras"
+checkpoint_path = "Trained_Models/ODIR5K-Multi-Class/ODIR5K.keras"
 checkpoint_dir = os.path.dirname(checkpoint_path)
 
 cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
@@ -702,7 +702,7 @@ history = model.fit(train_generator, validation_data=validation_generator,
                                ])
 
 # %%
-model_path = 'Trained_Models/ODIR5K-bottleneck/'
+model_path = 'Trained_Models/ODIR5K-Multi-Class-bottleneck/'
 checkpoint_path = model_path + 'ODIR5K.ckpt'
 checkpoint_dir = os.path.dirname(checkpoint_path)
 
@@ -775,7 +775,7 @@ plt.show()
 # import os
 # import numpy as np
 
-# model_path = 'Trained_Models/ODIR5K-bottleneck/'
+# model_path = 'Trained_Models/ODIR5K-Multi-Class-bottleneck/'
 # model_save_name_h5 = 'ODIR5K.h5'
 # model = tf.keras.models.load_model(model_path + model_save_name_h5)
 

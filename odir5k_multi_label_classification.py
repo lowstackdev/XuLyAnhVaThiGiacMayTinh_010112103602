@@ -532,7 +532,7 @@ validation_generator = prepare_dataset(validation_features, validation_labels)
 # ## Set callback method
 
 # %%
-checkpoint_path = "Trained_Models/ODIR5K/ODIR5K.keras"
+checkpoint_path = "Trained_Models/ODIR5K-Multi-Label/ODIR5K.keras"
 checkpoint_dir = os.path.dirname(checkpoint_path)
 
 cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
