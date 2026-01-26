@@ -57,8 +57,8 @@ def get_key_diagnosis_single(col_name):
   # Collect unique keywords from left and right eye for these rows
   key_diagnosis = []
   for row in single_rows:
-      key_diagnosis.extend(left_eye_keywords[row])
-      key_diagnosis.extend(right_eye_keywords[row])
+    key_diagnosis.extend(left_eye_keywords[row])
+    key_diagnosis.extend(right_eye_keywords[row])
 
   return list(set(key_diagnosis))
 
@@ -112,7 +112,7 @@ def get_all_recognized_key(key_all):
     key_all_copy = [list(set(keywords)) for keywords in key_all]
     all_keywords = []
     for keywords in key_all_copy:
-        all_keywords.extend(keywords)
+      all_keywords.extend(keywords)
 
     return list(set(all_keywords))
 
@@ -188,9 +188,9 @@ while processing_required:
 #manual listing key
 keywords_to_process = [('suspected cataract', 3)]
 for keyword, disease_group_index in keywords_to_process:
-    if keyword in unrecognized_keywords_list and keyword not in all_key_diagnosis:
-        key_all[disease_group_index].append(keyword)
-        unrecognized_keywords_list.remove(keyword)
+  if keyword in unrecognized_keywords_list and keyword not in all_key_diagnosis:
+    key_all[disease_group_index].append(keyword)
+    unrecognized_keywords_list.remove(keyword)
 
 print(key_all[3])
 
@@ -207,19 +207,15 @@ training_path = 'training/'
 validation_path = 'validation/'
 testing_path = 'testing/'
 
-if os.path.exists(training_path) or os.path.exists(validation_path) or os.path.exists(testing_path):
-  shutil.rmtree(training_path)
-  shutil.rmtree(validation_path)
-  shutil.rmtree(testing_path)
+# Remove existing directories if they exist
+for path in [training_path, validation_path, testing_path]:
+  if os.path.exists(path):
+    shutil.rmtree(path)
 
-os.mkdir(training_path)
-os.mkdir(validation_path)
-os.mkdir(testing_path)
-
-for i in label_string:
-  os.mkdir(training_path + '/' + i)
-  os.mkdir(validation_path + '/' + i)
-  os.mkdir(testing_path + '/' + i)
+# Create main directories and subdirectories for each label
+for path in [training_path, validation_path, testing_path]:
+  for label in label_string:
+    os.makedirs(os.path.join(path, label), exist_ok=True)
 
 # %%
 testing_source_files = os.listdir(testing_source_path)
@@ -242,186 +238,67 @@ print(len(validation_files))
 print(len(testing_files))
 
 # %%
-tmp_df = df['Left-Fundus']
-print(len(tmp_df))
-print(tmp_df[12])
-tmp_df = df['Right-Fundus']
-print(right_eye_keywords[5])
-print(testing_files[1])
+def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
+  "Organize eye images into diagnosis-specific directories based on keywords"
+  # Mapping from keywords to label directories and key lists
+  label_mapping = [
+    (key_normal, 'Normal'),
+    (key_diabetes, 'Diabetes'),
+    (key_glaucoma, 'Glaucoma'),
+    (key_cataract, 'Cataract'),
+    (key_amd, 'AMD'),
+    (key_hypertension, 'Hypertension'),
+    (key_myopia, 'Myopia'),
+    (key_other_disease, 'Abnormalities')
+  ]
 
-tmp_keywords = right_eye_keywords
-print(tmp_keywords[12])
+  for file_name in file_list:
+    nrow = None
+    if 'left' in file_name:
+      tmp_df = df['Left-Fundus']
+      tmp_keywords = left_eye_keywords
+    elif 'right' in file_name:
+      tmp_df = df['Right-Fundus']
+      tmp_keywords = right_eye_keywords
 
-# %%
-not_sorted_files = []
-"using continue because there are files have more than one diagnosis keys"
-for file_name in training_files:
-  nrow = None
-  if 'left' in file_name:
-    tmp_df = df['Left-Fundus']
-    tmp_keywords = left_eye_keywords
-  elif 'right' in file_name:
-    tmp_df = df['Right-Fundus']
-    tmp_keywords = right_eye_keywords
+    for row in range(len(tmp_df)):
+      if file_name == tmp_df[row]:
+        nrow = row
+        break
 
-  for row in range(len(tmp_df)):
-    if file_name == tmp_df[row]:
-      nrow = row
-      break
+    if nrow is None:
+      shutil.copyfile(source_path + file_name, dest_path + file_name)
+      continue
 
-  if nrow == None:
-    # print("file not listed in data")
-    shutil.copyfile(training_source_path + file_name, training_path + file_name)
-    continue
+    for key_list, label_dir in label_mapping:
+      if any(keyword in key_list for keyword in tmp_keywords[nrow]):
+        shutil.copyfile(source_path + file_name, dest_path + label_dir + '/' + file_name)
+        break
 
-  for i in tmp_keywords[nrow]:
-    if i in key_normal:
-      shutil.copyfile(training_source_path + file_name, training_path + 'Normal/' + file_name)
-      continue
-    if i in key_diabetes:
-      shutil.copyfile(training_source_path + file_name, training_path + 'Diabetes/' + file_name)
-      continue
-    if i in key_glaucoma:
-      shutil.copyfile(training_source_path + file_name, training_path + 'Glaucoma/' + file_name)
-      continue
-    if i in key_cataract:
-      shutil.copyfile(training_source_path + file_name, training_path + 'Cataract/' + file_name)
-      continue
-    if i in key_amd:
-      shutil.copyfile(training_source_path + file_name, training_path + 'AMD/' + file_name)
-      continue
-    if i in key_hypertension:
-      shutil.copyfile(training_source_path + file_name, training_path + 'Hypertension/' + file_name)
-      continue
-    if i in key_myopia:
-      shutil.copyfile(training_source_path + file_name, training_path + 'Myopia/' + file_name)
-      continue
-    if i in key_other_disease:
-      shutil.copyfile(training_source_path + file_name, training_path + 'Abnormalities/' + file_name)
-      continue
-    # else:
-    print("Not in list key:", "| row:", row, "| file name:", file_name, "| key diagnosis:", i)
-    not_sorted_files.append(file_name)
-    not_sorted_files=list(set(not_sorted_files))
-    # break
+# Process training files
+organize_eye_images_by_diagnosis(training_files, training_source_path, training_path)
 
 print(len(os.listdir(training_path + 'AMD')))
 print(len(os.listdir(training_path + 'Abnormalities')))
 print(len(os.listdir(training_path + 'Normal')))
 print(len(os.listdir(training_path + 'Cataract')))
 
-# %%
-for file_name in validation_files:
-  nrow = None
-  if 'left' in file_name:
-    tmp_df = df['Left-Fundus']
-    tmp_keywords = left_eye_keywords
-  elif 'right' in file_name:
-    tmp_df = df['Right-Fundus']
-    tmp_keywords = right_eye_keywords
-
-  for row in range(len(tmp_df)):
-    if file_name == tmp_df[row]:
-      nrow = row
-      break
-
-  if nrow == None:
-    # print("file not listed in data")
-    shutil.copyfile(training_source_path + file_name, validation_path+file_name)
-    continue
-
-  for i in tmp_keywords[nrow]:
-    if i in key_normal:
-      shutil.copyfile(training_source_path + file_name, validation_path + 'Normal/' + file_name)
-      continue
-    if i in key_diabetes:
-      shutil.copyfile(training_source_path + file_name, validation_path + 'Diabetes/' + file_name)
-      continue
-    if i in key_glaucoma:
-      shutil.copyfile(training_source_path + file_name, validation_path + 'Glaucoma/' + file_name)
-      continue
-    if i in key_cataract:
-      shutil.copyfile(training_source_path + file_name, validation_path + 'Cataract/' + file_name)
-      continue
-    if i in key_amd:
-      shutil.copyfile(training_source_path + file_name, validation_path + 'AMD/' + file_name)
-      continue
-    if i in key_hypertension:
-      shutil.copyfile(training_source_path + file_name, validation_path + 'Hypertension/' + file_name)
-      continue
-    if i in key_myopia:
-      shutil.copyfile(training_source_path + file_name, validation_path + 'Myopia/' + file_name)
-      continue
-    if i in key_other_disease:
-      shutil.copyfile(training_source_path + file_name, validation_path + 'Abnormalities/' + file_name)
-      continue
-    # break
-    print("Not in list key:", "| row:", row, "| file name:", file_name, "| key diagnosis:", i)
-    not_sorted_files.append(file_name)
-    not_sorted_files=list(set(not_sorted_files))
+# Process validation files
+organize_eye_images_by_diagnosis(validation_files, training_source_path, validation_path)
 
 print(len(os.listdir(validation_path + 'AMD')))
 print(len(os.listdir(validation_path + 'Abnormalities')))
 print(len(os.listdir(validation_path + 'Normal')))
 print(len(os.listdir(validation_path + 'Cataract')))
 
-# %%
-for file_name in testing_files:
-  nrow = None
-  if 'left' in file_name:
-    tmp_df = df['Left-Fundus']
-    tmp_keywords = left_eye_keywords
-  if 'right' in file_name:
-    tmp_df = df['Right-Fundus']
-    tmp_keywords = right_eye_keywords
-
-  for row in range(len(tmp_df)):
-    if file_name == tmp_df[row]:
-      nrow = row
-      break
-
-  if nrow == None:
-    # print("file not listed in data")
-    shutil.copyfile(testing_source_path + file_name, testing_path + file_name)
-    continue
-
-  for i in tmp_keywords[nrow]:
-    if i in key_normal:
-      shutil.copyfile(testing_source_path + file_name, testing_path + 'Normal/' + file_name)
-      continue
-    if i in key_diabetes:
-      shutil.copyfile(testing_source_path + file_name, testing_path + 'Diabetes/' + file_name)
-      continue
-    if i in key_glaucoma:
-      shutil.copyfile(testing_source_path + file_name, testing_path + 'Glaucoma/' + file_name)
-      continue
-    if i in key_cataract:
-      shutil.copyfile(testing_source_path + file_name, testing_path + 'Cataract/' + file_name)
-      continue
-    if i in key_amd:
-      shutil.copyfile(testing_source_path + file_name, testing_path + 'AMD/' + file_name)
-      continue
-    if i in key_hypertension:
-      shutil.copyfile(testing_source_path + file_name, testing_path + 'Hypertension/' + file_name)
-      continue
-    if i in key_myopia:
-      shutil.copyfile(testing_source_path + file_name, testing_path + 'Myopia/' + file_name)
-      continue
-    if i in key_other_disease:
-      shutil.copyfile(testing_source_path + file_name, testing_path + 'Abnormalities/' + file_name)
-      continue
-    print("Not in list key:", "| row: ", row, "| file name: ", file_name, "| key diagnosis:", i)
-    not_sorted_files.append(file_name)
-    not_sorted_files=list(set(not_sorted_files))
+# Process testing files
+organize_eye_images_by_diagnosis(testing_files, testing_source_path, testing_path)
 
 print(len(os.listdir(testing_path + 'AMD')))
 print(len(os.listdir(testing_path + 'Abnormalities')))
 print(len(os.listdir(testing_path + 'Normal')))
 print(len(os.listdir(testing_path + 'Cataract')))
 print(len(os.listdir(testing_path)))
-
-# %%
-print(not_sorted_files)
 
 # %%
 from pathlib import Path
@@ -452,6 +329,8 @@ plt.imshow(img)
 target_size = (200, 300)
 # mode = 'grayscale'
 color_mode = 'rgb'
+shape_add = (3,)  # Default to RGB
+
 if color_mode == 'grayscale':
   shape_add = (1,)
 if color_mode == 'rgb':

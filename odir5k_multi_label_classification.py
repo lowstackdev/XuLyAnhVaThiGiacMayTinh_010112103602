@@ -284,46 +284,82 @@ def get_multi_label_from_keys(idx_label):
 			tmp_label.append(0)
 	return tmp_label
 
+import concurrent.futures
+from functools import partial
+
+def process_fundus_image_with_clahe(img_path, keywords, key_all, target_size):
+    """Process a single fundus image with CLAHE enhancement and generate diagnostic labels"""
+    try:
+        # Read image
+        fundus_img = cv2.imread(img_path)
+        if fundus_img is None:
+            return None, None, None
+
+        # Process keywords to generate multi-label diagnosis
+        indices = [get_index_label(key, key_all) for key in keywords]
+        indices = list(set(indices))
+        label = get_multi_label_from_keys(indices)
+
+        # Process image with CLAHE enhancement
+        clahe_img = CLAHE(img_path, target_size, 20, (10,10))
+
+        return label, os.path.basename(img_path), clahe_img
+
+    except Exception as e:
+        print(f"Error processing image {img_path}: {str(e)}")
+        return None, None, None
+
+def process_patient_record_parallel(row_idx, df, left_eye_keywords, right_eye_keywords, key_all, target_size):
+    """Process a single patient record (both eyes) in parallel and generate diagnostic data"""
+    results = []
+    try:
+        # Process left eye fundus image
+        left_img_path = os.path.join('ODIR-5K_Training_Images', df['Left-Fundus'][row_idx])
+        left_label, left_feature, left_clahe = process_fundus_image_with_clahe(left_img_path, left_eye_keywords[row_idx], key_all, target_size)
+        if left_label is not None:
+            results.append((left_label, left_feature, left_clahe))
+
+        # Process right eye fundus image
+        right_img_path = os.path.join('ODIR-5K_Training_Images', df['Right-Fundus'][row_idx])
+        right_label, right_feature, right_clahe = process_fundus_image_with_clahe(right_img_path, right_eye_keywords[row_idx], key_all, target_size)
+        if right_label is not None:
+            results.append((right_label, right_feature, right_clahe))
+
+    except Exception as e:
+        print(f"Error processing patient record {row_idx}: {str(e)}")
+
+    return results
+
+# Optimized parallel processing
 synthetic_labels = []
 synthetic_features = []
 clahe_images = []
-for i in range(len(df)):
-    try:
-        left_img_path = os.path.join('ODIR-5K_Training_Images', df['Left-Fundus'][i])
-        right_img_path = os.path.join('ODIR-5K_Training_Images', df['Right-Fundus'][i])
 
-        left_fundus_img = cv2.imread(left_img_path)
-        right_fundus_img = cv2.imread(right_img_path)
+# Parallel processing
+with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    process_func = partial(
+        process_patient_record_parallel,
+        df=df,
+        left_eye_keywords=left_eye_keywords,
+        right_eye_keywords=right_eye_keywords,
+        key_all=key_all,
+        target_size=target_size
+    )
 
-        if left_fundus_img is None or right_fundus_img is None:
-            print(f"Warning: Could not read images at row {i}")
-            continue
-        try:
-            left_indices = [get_index_label(key, key_all) for key in left_eye_keywords[i]]
-            left_indices = list(set(left_indices))
-            synthetic_labels.append(get_multi_label_from_keys(left_indices))
-            synthetic_features.append(df['Left-Fundus'][i])
-            clahe_images.append(CLAHE(left_img_path, target_size, 20, (10,10)))
+    futures = [executor.submit(process_func, i) for i in range(len(df))]
 
-            right_indices = [get_index_label(key, key_all) for key in right_eye_keywords[i]]
-            right_indices = list(set(right_indices))
-            synthetic_labels.append(get_multi_label_from_keys(right_indices))
-            synthetic_features.append(df['Right-Fundus'][i])
-            clahe_images.append(CLAHE(right_img_path, target_size, 20, (10,10)))
-
-        except Exception as e:
-            print(f"Error processing keywords at row {i}: {str(e)}")
-            continue
-
-    except Exception as e:
-        print(f"Error reading images at row {i}: {str(e)}")
-        continue
+    for future in concurrent.futures.as_completed(futures):
+        row_results = future.result()
+        for label, feature, clahe_img in row_results:
+            if label is not None:
+                synthetic_labels.append(label)
+                synthetic_features.append(feature)
+                clahe_images.append(clahe_img)
 
 # %% [markdown]
 # ## Split feature, label, and file name for training, validation and test
 
 # %%
-import numpy as np
 from sklearn.model_selection import train_test_split
 
 clahe_images = np.stack(clahe_images, axis=0)
