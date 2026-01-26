@@ -71,105 +71,70 @@ key_all_sets = [set(keywords) for keywords in key_all]
 
 # Remove "normal" keyword from all groups
 normal_keywords = key_all_sets[0]
-for i in range(1, len(key_all_sets)):
-  key_all_sets[i] -= normal_keywords
+key_all_sets[1:] = [keywords - normal_keywords for keywords in key_all_sets[1:]]
 
 # Remove duplicate keywords between groups
-for i in range(len(key_all_sets)):
-  for j in range(i+1, len(key_all_sets)):
-    # Find intersection and remove from the group with higher index
-    intersection = key_all_sets[i] & key_all_sets[j]
-    key_all_sets[j] -= intersection
+for i, keywords_i in enumerate(key_all_sets):
+  for keywords_j in key_all_sets[i+1:]:
+    keywords_j -= keywords_i & keywords_j
 
 # Convert back to list
-for i in range(len(key_all_sets)):
-  key_all[i] = list(key_all_sets[i])
+key_all[:] = [list(keywords) for keywords in key_all_sets]
 
 # Print results
-print("Intersect by normal:")
-for i in range(len(key_all)):
-  print(LABEL_STRINGS[i], len(key_all[i]))
-
-print("Intersect by other:")
+print("Intersected:")
 for i in range(len(key_all)):
   print(LABEL_STRINGS[i], len(key_all[i]))
 
 # %%
 def get_all_recognized_key(key_all):
-    key_all_copy = [list(set(keywords)) for keywords in key_all]
-    all_keywords = []
-    for keywords in key_all_copy:
-      all_keywords.extend(keywords)
-
-    return list(set(all_keywords))
+  return list(set([keyword for keywords in key_all for keyword in set(keywords)]))
 
 all_key_diagnosis = get_all_recognized_key(key_all)
 print("Total unique keywords:", len(all_key_diagnosis))
 
 # %%
-double_diagnosis_row = list(set(double_diagnosis_row))
+double_diagnosis_row = sorted(set(double_diagnosis_row))
 print("Double label row:", len(double_diagnosis_row))
-double_diagnosis_row.sort()
 
 # %%
-all_known_keywords = set()
-for keywords in key_all:
-  all_known_keywords.update(keywords)
-not_listed = set()
-
-for row in double_diagnosis_row:
-  for keyword in left_eye_keywords[row]:
-    if keyword not in all_known_keywords:
-      not_listed.add(keyword)
-
-  for keyword in right_eye_keywords[row]:
-    if keyword not in all_known_keywords:
-      not_listed.add(keyword)
-
-not_listed = list(not_listed)
+all_known_keywords = set().union(*key_all)
+not_listed = {keyword for row in double_diagnosis_row
+              for keyword in left_eye_keywords[row] + right_eye_keywords[row]
+              if keyword not in all_known_keywords}
 print("Not listed diagnosis key:", len(not_listed))
 
 # %%
 def intersect_from_multi_label(keyword_groups):
-  known_keywords = set()
-  for disease_keywords in keyword_groups:
-    known_keywords.update(disease_keywords)
+  known_keywords = set().union(*keyword_groups)
   unrecognized_keywords = set()
 
-  for record_index in double_diagnosis_row:
-    undiscovered_keywords = set()
-    for keyword in left_eye_keywords[record_index] + right_eye_keywords[record_index]:
-      if keyword not in known_keywords:
-        undiscovered_keywords.add(keyword)
+  for record_idx in double_diagnosis_row:
+    keywords = left_eye_keywords[record_idx] + right_eye_keywords[record_idx]
+    undiscovered = set(kw for kw in keywords if kw not in known_keywords)
 
-    if undiscovered_keywords:
-      related_disease_groups = []
-      for column_index in range(7, len(test_df.columns)):
-        if test_df[test_df.columns[column_index]][record_index] == 1:
-          related_disease_groups.append(column_index - 7)
+    if undiscovered:
+      related_groups = [col_idx - 7 for col_idx in range(7, len(test_df.columns))
+                        if test_df.iloc[record_idx, col_idx] == 1]
 
-      if len(related_disease_groups) == 1 and len(undiscovered_keywords) == 1:
-        disease_group_index = related_disease_groups[0]
-        new_keyword = undiscovered_keywords.pop()
-        keyword_groups[disease_group_index].append(new_keyword)
-        known_keywords.add(new_keyword)
+      if len(related_groups) == 1 and len(undiscovered) == 1:
+        keyword_groups[related_groups[0]].append(undiscovered.pop())
+        known_keywords.add(keyword_groups[related_groups[0]][-1])
       else:
-          unrecognized_keywords.update(undiscovered_keywords)
+        unrecognized_keywords.update(undiscovered)
 
   return keyword_groups, list(unrecognized_keywords)
 
-processing_required = True
-unrecognized_keywords_list = []
-
-while processing_required:
-  previous_keyword_count = len(all_key_diagnosis)
+# Process until convergence
+prev_count = 0
+while True:
+  prev_count = len(all_key_diagnosis)
   key_all, unrecognized_keywords_list = intersect_from_multi_label(key_all)
   all_key_diagnosis = get_all_recognized_key(key_all)
   print(unrecognized_keywords_list)
-  current_keyword_count = len(all_key_diagnosis)
-  if current_keyword_count == previous_keyword_count:
+  if len(all_key_diagnosis) == prev_count:
     print(True)
-    processing_required = False
+    break
 
 # %%
 TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images/'
@@ -191,73 +156,86 @@ for path in [TRAINING_PATH, VALIDATION_PATH, TESTING_PATH]:
 
 # %%
 testing_source_files = os.listdir(TESTING_SOURCE_PATH)
-print(len(testing_source_files))
+print(f"Total testing source images: {len(testing_source_files)}")
+
 training_source_files = os.listdir(TRAINING_SOURCE_PATH)
-print(len(training_source_files))
+print(f"Total training source images: {len(training_source_files)}")
 
 VALIDATION_FRACTION = 0.1
-N_VALIDATION = int(len(training_source_files) * VALIDATION_FRACTION)
-N_TRAINING = len(training_source_files) - N_VALIDATION
 
-validation_files = sample(training_source_files, N_VALIDATION)
-training_files = sample(training_source_files, N_TRAINING)
+# Group files by patient ID to prevent data leakage (same patient's eyes in different sets)
+# File naming convention: [PatientID]_[eye].jpg
+from collections import defaultdict
+patient_to_files = defaultdict(list)
+for f in training_source_files:
+  patient_id = f.split('_')[0]
+  patient_to_files[patient_id].append(f)
+
+unique_patient_ids = list(patient_to_files.keys())
+n_val_patients = int(len(unique_patient_ids) * VALIDATION_FRACTION)
+
+validation_patient_ids = sample(unique_patient_ids, n_val_patients)
+training_patient_ids = [pid for pid in unique_patient_ids if pid not in validation_patient_ids]
+
+validation_files = [f for pid in validation_patient_ids for f in patient_to_files[pid]]
+training_files = [f for pid in training_patient_ids for f in patient_to_files[pid]]
 testing_files = testing_source_files
-print(len(training_files))
-print(len(validation_files))
-print(len(testing_files))
+print(f"Total validation files: {len(validation_files)}")
+print(f"Total training files: {len(training_files)}")
+print(f"Total testing files: {len(testing_files)}")
 
 # %%
 def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
   "Organize eye images into diagnosis-specific directories based on keywords"
   label_mapping = list(zip(key_all, LABEL_STRINGS))
 
-  for file_name in file_list:
-    nrow = None
-    if 'left' in file_name:
-      tmp_df = df['Left-Fundus']
-      tmp_keywords = left_eye_keywords
-    elif 'right' in file_name:
-      tmp_df = df['Right-Fundus']
-      tmp_keywords = right_eye_keywords
+  EYE_DATA = [
+    ('Left-Fundus', left_eye_keywords),
+    ('Right-Fundus', right_eye_keywords)
+  ]
 
-    for row in range(len(tmp_df)):
-      if file_name == tmp_df[row]:
-        nrow = row
-        break
+  for file_name in file_list:
+    # Handle testing files with different naming convention (e.g., "1000_left.jpg")
+    if '_left' in file_name or '_right' in file_name:
+      # Extract base filename without _left/_right suffix for matching
+      base_name = file_name.replace('_left', '').replace('_right', '').replace('.jpg', '')
+      matching_files = [f for f in df['Left-Fundus'] if base_name in f] + [f for f in df['Right-Fundus'] if base_name in f]
+
+      if matching_files:
+        nrow, keywords_data = next(
+            ((i, keywords) for col, keywords in EYE_DATA
+             for i, val in enumerate(df[col]) if base_name in val),
+            (None, None)
+        )
+      else:
+        nrow, keywords_data = None, None
+    else:
+      nrow, keywords_data = next(
+          ((i, keywords) for col, keywords in EYE_DATA
+           for i, val in enumerate(df[col]) if val == file_name),
+          (None, None)
+      )
 
     if nrow is None:
-      shutil.copyfile(source_path + file_name, dest_path + file_name)
+      # If no match found, copy to the first category (Normal) as default
+      shutil.copy(source_path + file_name, os.path.join(dest_path, LABEL_STRINGS[0]))
       continue
 
     for key_list, label_dir in label_mapping:
-      if any(keyword in key_list for keyword in tmp_keywords[nrow]):
-        shutil.copyfile(source_path + file_name, dest_path + label_dir + '/' + file_name)
+      if any(keyword in key_list for keyword in keywords_data[nrow]):
+        shutil.copy(source_path + file_name, os.path.join(dest_path, label_dir))
         break
 
-# Process training files
-organize_eye_images_by_diagnosis(training_files, TRAINING_SOURCE_PATH, TRAINING_PATH)
-
-print(len(os.listdir(TRAINING_PATH + 'AMD')))
-print(len(os.listdir(TRAINING_PATH + 'Abnormalities')))
-print(len(os.listdir(TRAINING_PATH + 'Normal')))
-print(len(os.listdir(TRAINING_PATH + 'Cataract')))
-
-# Process validation files
-organize_eye_images_by_diagnosis(validation_files, TRAINING_SOURCE_PATH, VALIDATION_PATH)
-
-print(len(os.listdir(VALIDATION_PATH + 'AMD')))
-print(len(os.listdir(VALIDATION_PATH + 'Abnormalities')))
-print(len(os.listdir(VALIDATION_PATH + 'Normal')))
-print(len(os.listdir(VALIDATION_PATH + 'Cataract')))
-
-# Process testing files
-organize_eye_images_by_diagnosis(testing_files, TESTING_SOURCE_PATH, TESTING_PATH)
-
-print(len(os.listdir(TESTING_PATH + 'AMD')))
-print(len(os.listdir(TESTING_PATH + 'Abnormalities')))
-print(len(os.listdir(TESTING_PATH + 'Normal')))
-print(len(os.listdir(TESTING_PATH + 'Cataract')))
-print(len(os.listdir(TESTING_PATH)))
+for files, src, dest, name in [
+  (training_files, TRAINING_SOURCE_PATH, TRAINING_PATH, "Training"),
+  (validation_files, TRAINING_SOURCE_PATH, VALIDATION_PATH, "Validation"),
+  (testing_files, TESTING_SOURCE_PATH, TESTING_PATH, "Testing")
+]:
+  print(f"\nOrganizing {name} files...")
+  organize_eye_images_by_diagnosis(files, src, dest)
+  for label in LABEL_STRINGS:
+    count = len(os.listdir(os.path.join(dest, label)))
+    print(f"{name} {label} count: {count}")
 
 # %%
 # from pathlib import Path

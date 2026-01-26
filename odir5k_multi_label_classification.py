@@ -52,13 +52,10 @@ def get_key_diagnosis_single(col_name):
     # Find rows where target column == 1 AND all other diagnosis columns == 0
     single_rows = test_df[(test_df[col_name] == 1) & (test_df[other_diag_cols].sum(axis=1) == 0)].index
 
-    # Collect unique keywords from left and right eye for these rows
-    key_diagnosis = []
-    for row in single_rows:
-        key_diagnosis.extend(left_eye_keywords[row])
-        key_diagnosis.extend(right_eye_keywords[row])
+    unique_keywords = set().union(*[set(left_eye_keywords[row]) | set(right_eye_keywords[row])
+                                    for row in single_rows])
 
-    return list(set(key_diagnosis))
+    return list(unique_keywords)
 
 LABEL_STRINGS = ['Normal', 'Diabetes', 'Glaucoma', 'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Abnormalities']
 key_all = [get_key_diagnosis_single(test_df.columns[7 + i]) for i in range(8)]
@@ -74,105 +71,70 @@ key_all_sets = [set(keywords) for keywords in key_all]
 
 # Remove "normal" keyword from all groups
 normal_keywords = key_all_sets[0]
-for i in range(1, len(key_all_sets)):
-    key_all_sets[i] -= normal_keywords
+key_all_sets[1:] = [keywords - normal_keywords for keywords in key_all_sets[1:]]
 
 # Remove duplicate keywords between groups
-for i in range(len(key_all_sets)):
-    for j in range(i+1, len(key_all_sets)):
-        # Find intersection and remove from the group with higher index
-        intersection = key_all_sets[i] & key_all_sets[j]
-        key_all_sets[j] -= intersection
+for i, keywords_i in enumerate(key_all_sets):
+  for keywords_j in key_all_sets[i+1:]:
+    keywords_j -= keywords_i & keywords_j
 
 # Convert back to list
-for i in range(len(key_all_sets)):
-    key_all[i] = list(key_all_sets[i])
+key_all[:] = [list(keywords) for keywords in key_all_sets]
 
 # Print results
-print("Intersect by normal:")
-for i in range(len(key_all)):
-  print(LABEL_STRINGS[i], len(key_all[i]))
-
-print("Intersect by other:")
+print("Intersected:")
 for i in range(len(key_all)):
   print(LABEL_STRINGS[i], len(key_all[i]))
 
 # %%
 def get_all_recognized_key(key_all):
-    key_all_copy = [list(set(keywords)) for keywords in key_all]
-    all_keywords = []
-    for keywords in key_all_copy:
-        all_keywords.extend(keywords)
-
-    return list(set(all_keywords))
+  return list(set([keyword for keywords in key_all for keyword in set(keywords)]))
 
 all_key_diagnosis = get_all_recognized_key(key_all)
 print("Total unique keywords:", len(all_key_diagnosis))
 
 # %%
-double_diagnosis_row = list(set(double_diagnosis_row))
-print("Double label row", len(double_diagnosis_row))
-double_diagnosis_row.sort()
+double_diagnosis_row = sorted(set(double_diagnosis_row))
+print("Double label row:", len(double_diagnosis_row))
 
 # %%
-all_known_keywords = set()
-for keywords in key_all:
-    all_known_keywords.update(keywords)
-not_listed = set()
-
-for row in double_diagnosis_row:
-    for keyword in left_eye_keywords[row]:
-        if keyword not in all_known_keywords:
-            not_listed.add(keyword)
-
-    for keyword in right_eye_keywords[row]:
-        if keyword not in all_known_keywords:
-            not_listed.add(keyword)
-
-not_listed = list(not_listed)
+all_known_keywords = set().union(*key_all)
+not_listed = {keyword for row in double_diagnosis_row
+              for keyword in left_eye_keywords[row] + right_eye_keywords[row]
+              if keyword not in all_known_keywords}
 print("Not listed diagnosis key:", len(not_listed))
 
 # %%
 def intersect_from_multi_label(keyword_groups):
-    known_keywords = set()
-    for disease_keywords in keyword_groups:
-        known_keywords.update(disease_keywords)
-    unrecognized_keywords = set()
+  known_keywords = set().union(*keyword_groups)
+  unrecognized_keywords = set()
 
-    for record_index in double_diagnosis_row:
-        undiscovered_keywords = set()
-        for keyword in left_eye_keywords[record_index] + right_eye_keywords[record_index]:
-            if keyword not in known_keywords:
-                undiscovered_keywords.add(keyword)
+  for record_idx in double_diagnosis_row:
+    keywords = left_eye_keywords[record_idx] + right_eye_keywords[record_idx]
+    undiscovered = set(kw for kw in keywords if kw not in known_keywords)
 
-        if undiscovered_keywords:
-            related_disease_groups = []
-            for column_index in range(7, len(test_df.columns)):
-                if test_df[test_df.columns[column_index]][record_index] == 1:
-                    related_disease_groups.append(column_index-7)
+    if undiscovered:
+      related_groups = [col_idx - 7 for col_idx in range(7, len(test_df.columns))
+                        if test_df.iloc[record_idx, col_idx] == 1]
 
-            if len(related_disease_groups) == 1 and len(undiscovered_keywords) == 1:
-                disease_group_index = related_disease_groups[0]
-                new_keyword = undiscovered_keywords.pop()
-                keyword_groups[disease_group_index].append(new_keyword)
-                known_keywords.add(new_keyword)
-            else:
-                unrecognized_keywords.update(undiscovered_keywords)
+      if len(related_groups) == 1 and len(undiscovered) == 1:
+        keyword_groups[related_groups[0]].append(undiscovered.pop())
+        known_keywords.add(keyword_groups[related_groups[0]][-1])
+      else:
+        unrecognized_keywords.update(undiscovered)
 
-    return keyword_groups, list(unrecognized_keywords)
+  return keyword_groups, list(unrecognized_keywords)
 
-processing_required = True
-unrecognized_keywords_list = []
-
-while processing_required:
-    previous_keyword_count = len(all_key_diagnosis)
-    key_all, unrecognized_keywords_list = intersect_from_multi_label(key_all)
-    all_key_diagnosis = get_all_recognized_key(key_all)
-    print(unrecognized_keywords_list)
-    current_keyword_count = len(all_key_diagnosis)
-    if current_keyword_count == previous_keyword_count:
-        print(True)
-        processing_required = False
+# Process until convergence
+prev_count = 0
+while True:
+  prev_count = len(all_key_diagnosis)
+  key_all, unrecognized_keywords_list = intersect_from_multi_label(key_all)
+  all_key_diagnosis = get_all_recognized_key(key_all)
+  print(unrecognized_keywords_list)
+  if len(all_key_diagnosis) == prev_count:
+    print(True)
+    break
 
 # %%
 # Define method for image resize, cropping and image Contrast Limited Adaptive Histogram Equalization (CLAHE)
@@ -199,10 +161,8 @@ def CLAHE(image_path, dim, clipLimit, tileGridSize):
     return img
 
 # %%
-# Set target size image
 TARGET_SIZE = (230, 230)
-# COLOR_MODE = 'grayscale'
-COLOR_MODE = 'rgb'
+COLOR_MODE = 'rgb' # 'grayscale'
 SHAPE_ADD = (3,)  # Default to RGB
 if COLOR_MODE == 'grayscale':
 	SHAPE_ADD = (1,)
@@ -214,19 +174,11 @@ elif COLOR_MODE == 'rgb':
 
 # Return index in key of all diagnosis list
 def get_index_label(key, key_all):
-    for i in key_all:
-        if key in i:
-            return key_all.index(i)
+    return next(i for i, keywords in enumerate(key_all) if key in keywords)
 
 # Return multilabel by index
 def get_multi_label_from_keys(idx_label):
-    tmp_label = []
-    for i in range(8):
-        if i in idx_label:
-            tmp_label.append(1)
-        else:
-            tmp_label.append(0)
-    return tmp_label
+    return [1 if i in idx_label else 0 for i in range(8)]
 
 # %%
 import concurrent.futures
@@ -235,9 +187,8 @@ from functools import partial
 def process_fundus_image_with_clahe(img_path, keywords, key_all, target_size):
     """Process a single fundus image with CLAHE enhancement and generate diagnostic labels"""
     try:
-        # Read image
-        fundus_img = cv2.imread(img_path)
-        if fundus_img is None:
+        # Read image and check if valid
+        if (fundus_img := cv2.imread(img_path)) is None:
             return None, None, None
 
         # Process keywords to generate multi-label diagnosis
@@ -258,17 +209,12 @@ def process_patient_record_parallel(row_idx, df, left_eye_keywords, right_eye_ke
     """Process a single patient record (both eyes) in parallel and generate diagnostic data"""
     results = []
     try:
-        # Process left eye fundus image
-        left_img_path = os.path.join('ODIR-5K_Training_Images', df['Left-Fundus'][row_idx])
-        left_label, left_feature, left_clahe = process_fundus_image_with_clahe(left_img_path, left_eye_keywords[row_idx], key_all, target_size)
-        if left_label is not None:
-            results.append((left_label, left_feature, left_clahe))
-
-        # Process right eye fundus image
-        right_img_path = os.path.join('ODIR-5K_Training_Images', df['Right-Fundus'][row_idx])
-        right_label, right_feature, right_clahe = process_fundus_image_with_clahe(right_img_path, right_eye_keywords[row_idx], key_all, target_size)
-        if right_label is not None:
-            results.append((right_label, right_feature, right_clahe))
+        # Process both eyes using a loop
+        for eye_side, fundus_col, keywords_col in [('Left', 'Left-Fundus', left_eye_keywords), ('Right', 'Right-Fundus', right_eye_keywords)]:
+            img_path = os.path.join('ODIR-5K_Training_Images', df[fundus_col][row_idx])
+            label, feature, clahe = process_fundus_image_with_clahe(img_path, keywords_col[row_idx], key_all, target_size)
+            if label is not None:
+                results.append((label, feature, clahe))
 
     except Exception as e:
         print(f"Error processing patient record {row_idx}: {str(e)}")
@@ -294,21 +240,45 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
     futures = [executor.submit(process_func, i) for i in range(len(df))]
 
     for future in concurrent.futures.as_completed(futures):
-        row_results = future.result()
-        for label, feature, clahe_img in row_results:
+        for label, feature, clahe_img in future.result():
             if label is not None:
                 synthetic_labels.append(label)
                 synthetic_features.append(feature)
                 clahe_images.append(clahe_img)
 
 # %%
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GroupShuffleSplit
 
 clahe_images = np.stack(clahe_images, axis=0)
 synthetic_labels = np.asarray(synthetic_labels)
 
-training_features, tmp_validation_features, training_labels, tmp_validation_labels, training_filenames, tmp_validation_filenames = train_test_split(clahe_images, synthetic_labels, synthetic_features, test_size=0.102, random_state=1)
-validation_features, validation_test_features, validation_labels, validation_test_labels, validation_filenames, validation_test_filenames = train_test_split(tmp_validation_features, tmp_validation_labels, tmp_validation_filenames, test_size=0.02, random_state=1)
+# Grouping by patient ID to prevent data leakage (same patient's eyes in different sets)
+groups = [f.split('_')[0] for f in synthetic_features]
+
+# First split: Training vs (Validation + Test)
+gss1 = GroupShuffleSplit(n_splits=1, test_size=0.102, random_state=1)
+train_idx, val_tmp_idx = next(gss1.split(clahe_images, synthetic_labels, groups=groups))
+
+training_features = clahe_images[train_idx]
+training_labels = synthetic_labels[train_idx]
+training_filenames = [synthetic_features[i] for i in train_idx]
+
+tmp_validation_features = clahe_images[val_tmp_idx]
+tmp_validation_labels = synthetic_labels[val_tmp_idx]
+tmp_validation_filenames = [synthetic_features[i] for i in val_tmp_idx]
+tmp_validation_groups = [groups[i] for i in val_tmp_idx]
+
+# Second split: Validation vs Validation Test
+gss2 = GroupShuffleSplit(n_splits=1, test_size=0.02, random_state=1)
+val_idx, test_idx = next(gss2.split(tmp_validation_features, tmp_validation_labels, groups=tmp_validation_groups))
+
+validation_features = tmp_validation_features[val_idx]
+validation_labels = tmp_validation_labels[val_idx]
+validation_filenames = [tmp_validation_filenames[i] for i in val_idx]
+
+validation_test_features = tmp_validation_features[test_idx]
+validation_test_labels = tmp_validation_labels[test_idx]
+validation_test_filenames = [tmp_validation_filenames[i] for i in test_idx]
 
 print("n training:", len(training_filenames))
 print("n validation:", len(validation_filenames))
