@@ -11,10 +11,13 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import sklearn
+from sklearn.preprocessing import MultiLabelBinarizer
+import cv2
 import tensorflow as tf
 import tensorflow.keras.optimizers
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+import tensorflow.keras.backend as K
 
 print(tf.__version__)
 
@@ -116,7 +119,7 @@ print(key_normal)
 # %%
 print("Intersect by normal:")
 for i in range(1,len(key_all)):
-	key_all[i] = list(set(key_all[i])-set(key_all[0]))
+	key_all[i] = list(set(key_all[i]) - set(key_all[0]))
 
 for i in range(8):
 	print(label_string[i], len(key_all[i]))
@@ -127,7 +130,7 @@ for i in range(len(key_all)):
 		if i == j:
 			continue
 		else :
-			key_all[i] = list(set(key_all[i])-set(key_all[j]))
+			key_all[i] = list(set(key_all[i]) - set(key_all[j]))
 
 for i in range(8):
 	print(label_string[i], len(key_all[i]))
@@ -453,9 +456,9 @@ training_features, temp_validation_features, training_labels, temp_validation_la
 
 validation_features, validation_test_features, validation_labels, validation_test_labels, validation_filenames, validation_test_filenames = train_test_split(temp_validation_features, temp_validation_labels, temp_validation_filenames, test_size=0.02, random_state=1)
 
-print("n training :", len(training_filenames))
-print("n validation :", len(validation_filenames))
-print("n validation test :", len(validation_test_filenames))
+print("n training:", len(training_filenames))
+print("n validation:", len(validation_filenames))
+print("n validation test:", len(validation_test_filenames))
 
 # Delete temporary list file for minimalizing memory usage
 del clahe_image
@@ -700,7 +703,7 @@ def hamming_loss_func(y_true, y_pred):
 
 	#Counting non-zeros in a differentiable way
 	epsilon = K.epsilon()
-	nonzero = tf.reduce_sum( tf.math.abs(diff / (tf.math.abs(diff) + epsilon) ))
+	nonzero = tf.reduce_sum(tf.math.abs(diff / (tf.math.abs(diff) + epsilon)))
 
 	return tf.reduce_mean(nonzero / K.int_shape(y_pred)[-1])
 
