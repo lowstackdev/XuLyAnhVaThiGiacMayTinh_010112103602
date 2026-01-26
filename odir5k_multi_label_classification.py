@@ -1,5 +1,5 @@
 # %% [markdown]
-# #Set Dependencies
+# # Set Dependencies
 
 # %%
 import os
@@ -543,12 +543,14 @@ cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
 												 verbose=1)
 
 stop_val_auc = 0.8200
+stop_accuracy = 0.90
+stop_val_accuracy = 0.90
 
 # Define a Callback class that stops training once accuracy reaches the certain accuracy
 class CallbackStop(tf.keras.callbacks.Callback):
 	def on_epoch_end(self, epoch, logs={}):
 		if(logs.get('accuracy_multilabel', 0.0) > stop_accuracy or logs.get('val_accuracy_multilabel', 0.0) > stop_val_accuracy):
-			print("Reached stoping value so cancelling training!")
+			print(f"Reached accuracy threshold ({stop_accuracy}) or validation accuracy threshold ({stop_val_accuracy}) so cancelling training!")
 			self.model.stop_training = True
 
 callback_stop = CallbackStop()
@@ -708,7 +710,7 @@ def hamming_loss_func(y_true, y_pred):
 	return tf.reduce_mean(nonzero / K.int_shape(y_pred)[-1])
 
 # %% [markdown]
-# ##Define Model
+# ## Define Model
 
 # %%
 # use_model = "use transfer learning using vgg19"
@@ -918,7 +920,7 @@ tflite_model = converter.convert()
 open(model_path + "ODIR5K.tflite", "wb").write(tflite_model)
 
 # %% [markdown]
-# ##plot the training and validation step
+# ## plot the training and validation step
 
 # %%
 precision = history.history['precision']
