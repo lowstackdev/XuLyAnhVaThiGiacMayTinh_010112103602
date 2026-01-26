@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MultiLabelBinarizer
+from sklearn.utils import compute_class_weight
 import tensorflow as tf
 from tensorflow.keras.preprocessing import image
 
@@ -262,13 +263,14 @@ for files, src, dest, name in [
 # plt.imshow(img)
 
 # %%
-TARGET_SIZE = (200, 300) # (int(height/16),int(width/16))
-COLOR_MODE = 'rgb' # 'grayscale'
-SHAPE_ADD = (3,)  # Default to RGB
-if COLOR_MODE == 'grayscale':
-  SHAPE_ADD = (1,)
-if COLOR_MODE == 'rgb':
-  SHAPE_ADD = (3,)
+TARGET_SIZE = (200, 300) # (int(height/16), int(width/16))
+COLOR_MODE = 'rgb'
+COLOR_SHAPE_MAP = {
+  'grayscale': (1,),
+  'rgb': (3,),
+  'rgba': (4,)
+}
+SHAPE_ADD = COLOR_SHAPE_MAP.get(COLOR_MODE, (3,))
 
 # %%
 # 1. Load Raw Datasets
@@ -297,8 +299,42 @@ raw_val_ds = tf.keras.utils.image_dataset_from_directory(
 
 # 2. Define Preprocessing/Augmentation Pipeline
 augmentation_layers = tf.keras.Sequential([
-  tf.keras.layers.RandomRotation(factor=40/360, fill_mode='nearest'), # rotation_range=40
-  tf.keras.layers.RandomZoom(height_factor=0.2, width_factor=0.2, fill_mode='nearest'), # zoom_range=0.2
+  # 1. GEOMETRIC TRANSFORMATIONS (limited)
+  tf.keras.layers.RandomRotation(
+      factor=0.1,  # ±36 degrees - small to preserve orientation
+      fill_mode='nearest'
+  ),
+  tf.keras.layers.RandomZoom(
+      height_factor=0.15,
+      width_factor=0.15,  # Uniform zoom in both dimensions
+      fill_mode='nearest'
+  ),
+  tf.keras.layers.RandomTranslation(
+      height_factor=0.05,  # Only 5% - very small
+      width_factor=0.05,
+      fill_mode='nearest'
+  ),
+
+  # 2. PHOTOMETRIC TRANSFORMATIONS (important)
+  tf.keras.layers.RandomBrightness(
+      max_delta=0.15,  # 15% - not too large
+      value_range=(0, 1)  # Pixel values are already normalized
+  ),
+  tf.keras.layers.RandomContrast(
+      factor=0.15  # 15% contrast variation
+  ),
+
+  # 3. NOISE & ARTIFACTS (real-world simulation)
+  tf.keras.layers.GaussianNoise(
+      stddev=0.01  # Small noise
+  ),
+
+  # 4. BLUR (simulating focus issues)
+  tf.keras.layers.RandomZoom(
+      height_factor=(-0.02, 0.02),  # Minor blur effect
+      width_factor=(-0.02, 0.02),
+      fill_mode='nearest'
+  ),
 ])
 
 rescaling_layer = tf.keras.layers.Rescaling(1./255)
@@ -314,6 +350,16 @@ def prepare_dataset(ds, augment=False):
 
 train_generator = prepare_dataset(raw_train_ds, augment=True)
 validation_generator = prepare_dataset(raw_val_ds)
+
+# Extract labels from training dataset for class weight calculation
+train_labels = np.concatenate([y for x, y in raw_train_ds], axis=0)
+train_labels = np.argmax(train_labels, axis=1)  # Convert one-hot to class indices
+
+class_weights = compute_class_weight(
+  'balanced',
+  classes=np.unique(train_labels),
+  y=train_labels
+)
 
 # %%
 USE_MODEL = "using custom"
@@ -334,16 +380,26 @@ AUC_VALUE = tf.keras.metrics.AUC(num_thresholds=200, curve='ROC', summation_meth
 PRECISION_SCORE = tf.keras.metrics.Precision(name='precision')
 RECALL_SCORE = tf.keras.metrics.Recall(name='recall')
 
-STOP_ACCURACY = 0.90
-
-class CallbackStop(tf.keras.callbacks.Callback):
-  def on_epoch_end(self, epoch, logs={}):
-    if(logs.get('accuracy') > STOP_ACCURACY):
-      print("Reached", STOP_ACCURACY * 100, "accuracy so cancelling training!")
-      self.model.stop_training = True
-
-callback_stop = CallbackStop()
-callback_cp = tf.keras.callbacks.ModelCheckpoint(filepath=CHECKPOINT_PATH, verbose=1)
+callbacks = [
+  tf.keras.callbacks.EarlyStopping(
+    monitor='val_loss',
+    patience=10,
+    restore_best_weights=True
+  ),
+  tf.keras.callbacks.ModelCheckpoint(
+    CHECKPOINT_PATH,
+    monitor='val_auc',
+    save_best_only=True,
+    mode='max',
+    verbose=1
+  ),
+  tf.keras.callbacks.ReduceLROnPlateau(
+    monitor='val_loss',
+    factor=0.5,
+    patience=5,
+    verbose=1
+  )
+]
 
 # %%
 if os.path.isfile(MODEL_PATH + MODEL_SAVE_NAME_H5) and USE_PRETRAINED_MODEL:
@@ -381,12 +437,11 @@ model.compile(loss='categorical_crossentropy',
 # %%
 history = model.fit(train_generator, validation_data=validation_generator,
                     epochs=N_EPOCH,
-                    steps_per_epoch=50,
-                    # batch_size=train_generator.batch_size,
-                    # steps_per_epoch = train_generator.samples // train_generator.batch_size,
-                    # validation_steps = validation_generator.samples // validation_generator.batch_size,
+                    steps_per_epoch=train_generator.samples//train_generator.batch_size,
+                    validation_steps=validation_generator.samples//validation_generator.batch_size,
+                    class_weights=class_weights,
                     verbose=1,
-                    callbacks=[callback_stop]) # callback_cp
+                    callbacks=callbacks)
 
 # %%
 model.save_weights(MODEL_PATH + MODEL_SAVE_WEIGHTS)

@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MultiLabelBinarizer
+from sklearn.utils import compute_class_weight
 import cv2
 import tensorflow as tf
 
@@ -140,17 +141,17 @@ while True:
 # Define method for image resize, cropping and image Contrast Limited Adaptive Histogram Equalization (CLAHE)
 # using Opencv 4
 
-def image_resize(image_path, dim):
+def resize_image(image_path, dim):
     img = cv2.imread(image_path)
     if img.shape[1] != img.shape[0]:
         x = img.shape[1] // 2
         y = img.shape[0] // 2
-        x = x-y
+        x -= y
         img = img[0:0 + img.shape[0], x:x + img.shape[0]]
     return cv2.resize(img, dim, interpolation = cv2.INTER_AREA)
 
 def CLAHE(image_path, dim, clipLimit, tileGridSize):
-    img = image_resize(image_path, dim)
+    img = resize_image(image_path, dim)
     clahe = cv2.createCLAHE(clipLimit=clipLimit, tileGridSize=tileGridSize)
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)  # convert from BGR to LAB color space
     l, a, b = cv2.split(lab)  # split on 3 different channels
@@ -162,25 +163,25 @@ def CLAHE(image_path, dim, clipLimit, tileGridSize):
 
 # %%
 TARGET_SIZE = (230, 230)
-COLOR_MODE = 'rgb' # 'grayscale'
-SHAPE_ADD = (3,)  # Default to RGB
-if COLOR_MODE == 'grayscale':
-	SHAPE_ADD = (1,)
-elif COLOR_MODE == 'rgb':
-	SHAPE_ADD = (3,)
+COLOR_MODE = 'rgb'
+COLOR_SHAPE_MAP = {
+    'grayscale': (1,),
+    'rgb': (3,),
+    'rgba': (4,)
+}
+SHAPE_ADD = COLOR_SHAPE_MAP.get(COLOR_MODE, (3,))
 
 # %%
 # Function for generate label to single image
 
 # Return index in key of all diagnosis list
 def get_index_label(key, key_all):
-    return next(i for i, keywords in enumerate(key_all) if key in keywords)
+    return next((i for i, keywords in enumerate(key_all) if key in keywords), -1)
 
 # Return multilabel by index
 def get_multi_label_from_keys(idx_label):
     return [1 if i in idx_label else 0 for i in range(8)]
 
-# %%
 import concurrent.futures
 from functools import partial
 
@@ -256,7 +257,7 @@ synthetic_labels = np.asarray(synthetic_labels)
 groups = [f.split('_')[0] for f in synthetic_features]
 
 # First split: Training vs (Validation + Test)
-gss1 = GroupShuffleSplit(n_splits=1, test_size=0.102, random_state=1)
+gss1 = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=1)
 train_idx, val_tmp_idx = next(gss1.split(clahe_images, synthetic_labels, groups=groups))
 
 training_features = clahe_images[train_idx]
@@ -269,7 +270,7 @@ tmp_validation_filenames = [synthetic_features[i] for i in val_tmp_idx]
 tmp_validation_groups = [groups[i] for i in val_tmp_idx]
 
 # Second split: Validation vs Validation Test
-gss2 = GroupShuffleSplit(n_splits=1, test_size=0.02, random_state=1)
+gss2 = GroupShuffleSplit(n_splits=1, test_size=0.5, random_state=1)
 val_idx, test_idx = next(gss2.split(tmp_validation_features, tmp_validation_labels, groups=tmp_validation_groups))
 
 validation_features = tmp_validation_features[val_idx]
@@ -284,6 +285,16 @@ print("n training:", len(training_filenames))
 print("n validation:", len(validation_filenames))
 print("n validation test:", len(validation_test_filenames))
 
+# Approximate class weights by looking at the presence of each class (multi-label)
+train_labels_idx = np.argmax(training_labels, axis=1)
+class_weights_vals = compute_class_weight(
+    class_weight='balanced',
+    classes=np.arange(8),
+    y=train_labels_idx
+)
+class_weights = dict(enumerate(class_weights_vals))
+print("Class weights:", class_weights)
+
 # Delete temporary list file for minimalizing memory usage
 del clahe_images
 del synthetic_labels
@@ -292,31 +303,33 @@ del tmp_validation_labels
 del tmp_validation_filenames
 
 # %%
-f, ax = plt.subplots(2, 5)
-f.set_size_inches(10, 10)
-for idx in range(10):
-    i, j = divmod(idx, 5)
-    if COLOR_MODE == 'rgb':
-        ax[i,j].imshow(training_features[idx].reshape(TARGET_SIZE[0], TARGET_SIZE[1], 3), cmap="hsv")
-    else:
-        ax[i,j].imshow(training_features[idx].reshape(TARGET_SIZE[0], TARGET_SIZE[1]), cmap="gray")
+def display_image_samples(features, title, color_mode, target_size):
+    """Display a 2x5 grid of image samples with proper coloring based on color mode"""
+    f, ax = plt.subplots(2, 5)
+    f.set_size_inches(10, 10)
+    f.suptitle(title, fontsize=16)
 
-plt.tight_layout()
+    for idx in range(10):
+        i, j = divmod(idx, 5)
+        if color_mode == 'rgb':
+            ax[i,j].imshow(features[idx].reshape(target_size[0], target_size[1], 3), cmap="hsv")
+        else:
+            ax[i,j].imshow(features[idx].reshape(target_size[0], target_size[1]), cmap="gray")
 
-# %%
-f, ax = plt.subplots(2, 5)
-f.set_size_inches(10, 10)
-for idx in range(10):
-    i, j = divmod(idx, 5)
-    ax[i,j].imshow(validation_features[idx].reshape(TARGET_SIZE[0], TARGET_SIZE[1], 3), cmap="hsv")
+    plt.tight_layout()
+    plt.show()
 
-plt.tight_layout()
+display_image_samples(training_features, "Training Image Samples", COLOR_MODE, TARGET_SIZE)
+display_image_samples(validation_features, "Validation Image Samples", COLOR_MODE, TARGET_SIZE)
 
 # %%
 # 1. Define Preprocessing/Augmentation Pipeline
 augmentation_layers = tf.keras.Sequential([
-    tf.keras.layers.RandomRotation(factor=30/360, fill_mode='nearest'), # rotation_range=30
-    tf.keras.layers.RandomFlip("horizontal"), # horizontal_flip=True
+    tf.keras.layers.RandomRotation(factor=0.0833, fill_mode='nearest'),  # ±30 degrees
+    tf.keras.layers.RandomZoom(height_factor=0.15, width_factor=0.15, fill_mode='nearest'),
+    tf.keras.layers.RandomBrightness(max_delta=0.1),  # Adjust brightness
+    tf.keras.layers.RandomContrast(factor=0.1),       # Adjust contrast
+    tf.keras.layers.GaussianNoise(0.01),
 ])
 
 rescaling_layer = tf.keras.layers.Rescaling(1./255)
@@ -329,9 +342,12 @@ def prepare_dataset(features, labels, augment=False):
     ds = ds.map(lambda x, y: (rescaling_layer(tf.cast(x, tf.float32)), y),
                 num_parallel_calls=tf.data.AUTOTUNE)
 
+    ds = ds.cache()
+
     if augment:
-        # Shuffle and apply augmentations only to training
+        # Shuffle, repeat, and apply augmentations only to training
         ds = ds.shuffle(buffer_size=min(len(features), 1000))
+        ds = ds.repeat()
         ds = ds.map(lambda x, y: (augmentation_layers(x, training=True), y),
                     num_parallel_calls=tf.data.AUTOTUNE)
 
@@ -361,16 +377,26 @@ AUC_VALUE = tf.keras.metrics.AUC(name='auc_value', curve='ROC', summation_method
 PRECISION_SCORE = tf.keras.metrics.Precision(thresholds=0.5, name='precision')
 RECALL_SCORE = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
 
-STOP_ACCURACY = 0.90
-
-class CallbackStop(tf.keras.callbacks.Callback):
-    def on_epoch_end(self, epoch, logs={}):
-        if(logs.get('accuracy') > STOP_ACCURACY):
-            print("Reached", STOP_ACCURACY * 100, "accuracy so cancelling training!")
-            self.model.stop_training = True
-
-callback_stop = CallbackStop()
-callback_cp = tf.keras.callbacks.ModelCheckpoint(filepath=CHECKPOINT_PATH, verbose=1)
+callbacks = [
+  tf.keras.callbacks.EarlyStopping(
+    monitor='val_loss',
+    patience=10,
+    restore_best_weights=True
+  ),
+  tf.keras.callbacks.ModelCheckpoint(
+    CHECKPOINT_PATH,
+    monitor='val_auc',
+    save_best_only=True,
+    mode='max',
+    verbose=1
+  ),
+  tf.keras.callbacks.ReduceLROnPlateau(
+    monitor='val_loss',
+    factor=0.5,
+    patience=5,
+    verbose=1
+  )
+]
 
 @tf.function
 def accuracy_multilabel(y, y_hat):
@@ -398,40 +424,41 @@ if os.path.isfile(MODEL_PATH + MODEL_SAVE_NAME_H5) and USE_PRETRAINED_MODEL:
 else:
     print("No using saved model")
     if USE_MODEL == "using custom":
-        from tensorflow.keras.layers import Conv2D, MaxPooling2D, BatchNormalization, Flatten, Dense
+        from tensorflow.keras.layers import Conv2D, MaxPooling2D, BatchNormalization, Flatten, Dense, Dropout
         inputs = tf.keras.Input(shape=INPUT_SHAPE)
 
-        # The first convolution block
-        x = Conv2D(32, (3,3), activation='relu')(inputs)
-        x = Conv2D(32, (3,3), activation='relu')(x)
-        x = MaxPooling2D(2, 2)(x)
+        # Conv larger kernel
+        x = Conv2D(32, (7,7), padding='same', activation='relu')(inputs)
         x = BatchNormalization()(x)
-
-        # The second convolution block
-        x = Conv2D(64, (3,3), activation='relu')(x)
-        x = Conv2D(64, (3,3), activation='relu')(x)
         x = MaxPooling2D(2,2)(x)
-        x = BatchNormalization()(x)
 
-        # The third convolution block
-        x = Conv2D(128, (3,3), activation='relu')(x)
-        x = Conv2D(128, (3,3), activation='relu')(x)
-        x = MaxPooling2D(2,2)(x)
-        x = BatchNormalization()(x)
+        # Residual blocks
+        for filters in [64, 128, 256]:
+            # Shortcut
+            shortcut = Conv2D(filters, (1,1), padding='same')(x) if x.shape[-1] != filters else x
 
-        # The fourth convolution block
-        x = Conv2D(256, (3,3), activation='relu')(x)
-        x = Conv2D(256, (3,3), activation='relu')(x)
-        x = MaxPooling2D(2,2)(x)
-        x = BatchNormalization()(x)
+            # Conv block
+            x = Conv2D(filters, (3,3), padding='same', activation='relu')(x)
+            x = BatchNormalization()(x)
+            x = Conv2D(filters, (3,3), padding='same', activation='relu')(x)
+            x = BatchNormalization()(x)
 
-        # Dense layers
-        x = Flatten()(x)
+            # Add shortcut
+            x = tf.keras.layers.Add()([x, shortcut])
+            x = tf.keras.layers.Activation('relu')(x)
+            x = MaxPooling2D(2,2)(x)
+
+        x = tf.keras.layers.GlobalAveragePooling2D()(x)
+        x = Dropout(0.5)(x)
+
+        # Dense
         x = Dense(256, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(x)
         x = BatchNormalization()(x)
+        x = Dropout(0.5)(x)
+
         x = Dense(128, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(x)
-        x = BatchNormalization()(x)
-        x = Dense(64, activation='relu')(x)
+        x = Dropout(0.5)(x)
+
         outputs = Dense(8, activation='sigmoid')(x)
 
         model = tf.keras.Model(inputs=inputs, outputs=outputs)
@@ -445,8 +472,9 @@ model.compile(loss=LOSS,
 history = model.fit(train_generator,
                     validation_data=validation_generator,
                     epochs=N_EPOCH,
+                    class_weight=class_weights,
                     verbose=1,
-                    callbacks=[callback_stop])
+                    callbacks=callbacks)
 
 # %%
 model.save_weights(MODEL_PATH + MODEL_SAVE_WEIGHTS)
