@@ -355,8 +355,8 @@ def multilabel_cross_entropy(y, y_hat):
 
 USE_MODEL = "using custom"
 USE_PRETRAINED_MODEL = False
-INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
 
+INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
 N_EPOCH = 1
 LEARNING_RATE = 1e-4
 LOSS = "binary_crossentropy"

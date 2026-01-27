@@ -1,4 +1,3 @@
-
 # %%
 import os
 from pathlib import Path
@@ -175,11 +174,11 @@ for path in [TRAINING_PATH, VALIDATION_PATH, TESTING_PATH]:
         os.makedirs(os.path.join(path, label), exist_ok=True)
 
 # %%
-testing_source_files = os.listdir(TESTING_SOURCE_PATH)
-print(f"Total testing source images: {len(testing_source_files)}")
-
 training_source_files = os.listdir(TRAINING_SOURCE_PATH)
 print(f"Total training source images: {len(training_source_files)}")
+
+testing_source_files = os.listdir(TESTING_SOURCE_PATH)
+print(f"Total testing source images: {len(testing_source_files)}")
 
 VALIDATION_FRACTION = 0.1
 
@@ -198,11 +197,11 @@ n_val_patients = int(len(unique_patient_ids) * VALIDATION_FRACTION)
 validation_patient_ids = sample(unique_patient_ids, n_val_patients)
 training_patient_ids = [pid for pid in unique_patient_ids if pid not in validation_patient_ids]
 
-validation_files = [f for pid in validation_patient_ids for f in patient_to_files[pid]]
 training_files = [f for pid in training_patient_ids for f in patient_to_files[pid]]
+validation_files = [f for pid in validation_patient_ids for f in patient_to_files[pid]]
 testing_files = testing_source_files
-print(f"Total validation files: {len(validation_files)}")
 print(f"Total training files: {len(training_files)}")
+print(f"Total validation files: {len(validation_files)}")
 print(f"Total testing files: {len(testing_files)}")
 
 # %%
@@ -210,32 +209,31 @@ def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
     "Organize eye images into diagnosis-specific directories based on keywords"
     label_mapping = list(zip(key_all, LABEL_STRINGS))
 
-    EYE_DATA = [("Left-Fundus", left_eye_keywords), ("Right-Fundus", right_eye_keywords)]
-
     for file_name in file_list:
-        # Handle testing files with different naming convention (e.g., "1000_left.jpg")
-        if "_left" in file_name or "_right" in file_name:
-            # Extract base filename without _left/_right suffix for matching
-            base_name = (file_name.replace("_left", "").replace("_right", "").replace(".jpg", ""))
-            matching_files = [f for f in df["Left-Fundus"] if base_name in f] + [f for f in df["Right-Fundus"] if base_name in f]
+        # Find matching row in the dataframe
+        nrow = None
+        keywords_data = None
 
-            if matching_files:
-                nrow, keywords_data = next(((i, keywords) for col, keywords in EYE_DATA for i, val in enumerate(df[col]) if base_name in val), (None, None))
-            else:
-                nrow, keywords_data = None, None
-        else:
-            nrow, keywords_data = next(((i, keywords) for col, keywords in EYE_DATA for i, val in enumerate(df[col]) if val == file_name), (None, None))
+        # Check if file matches Left-Fundus or Right-Fundus column
+        for col, keywords in [("Left-Fundus", left_eye_keywords), ("Right-Fundus", right_eye_keywords)]:
+            for i, val in enumerate(df[col]):
+                if val == file_name:
+                    nrow = i
+                    keywords_data = keywords
+                    break
+            if nrow is not None:
+                break
 
         if nrow is None:
             # If no match found, copy to the first category (Normal) as default
             shutil.copy(source_path + file_name, os.path.join(dest_path, LABEL_STRINGS[0]))
             continue
 
+        # Find matching diagnosis label
         for key_list, label_dir in label_mapping:
             if any(keyword in key_list for keyword in keywords_data[nrow]):
                 shutil.copy(source_path + file_name, os.path.join(dest_path, label_dir))
                 break
-
 
 for files, src, dest, name in [
     (training_files, TRAINING_SOURCE_PATH, TRAINING_PATH, "Training"),
@@ -316,9 +314,9 @@ class_weights = dict(enumerate(class_weight_vals))
 
 # %%
 USE_MODEL = "using custom"
-USE_PRETRAINED_MODEL = True
-INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
+USE_PRETRAINED_MODEL = False
 
+INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
 N_EPOCH = 1
 LEARNING_RATE = 0.0001
 OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)  # tf.keras.optimizers.SGD(learning_rate=LEARNING_RATE)
