@@ -60,20 +60,20 @@ print("All keys:", sum(len(x) for x in all_key_single_label))
 for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
 
 # %%
-all_key_sets = [set(keywords) for keywords in all_key_single_label]
+# all_key_sets = [set(keywords) for keywords in all_key_single_label]
 
-# Remove "normal" keyword from all groups
-normal_keywords = all_key_sets[0]
-all_key_sets[1:] = [keywords - normal_keywords for keywords in all_key_sets[1:]]
+# # Remove "normal" keyword from all groups
+# normal_keywords = all_key_sets[0]
+# all_key_sets[1:] = [keywords - normal_keywords for keywords in all_key_sets[1:]]
 
-# Remove duplicate keywords between groups
-for i, current in enumerate(all_key_sets):
-    for next in all_key_sets[i + 1 :]:
-        next -= current & next
+# # Remove duplicate keywords between groups
+# for i, current in enumerate(all_key_sets):
+#     for next in all_key_sets[i + 1 :]:
+#         next -= current & next
 
-all_key_single_label = [list(keywords) for keywords in all_key_sets]
-print("Intersected:", sum(len(x) for x in all_key_single_label))
-for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
+# all_key_single_label = [list(keywords) for keywords in all_key_sets]
+# print("Intersected:", sum(len(x) for x in all_key_single_label))
+# for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
 
 # %%
 # %%
@@ -173,38 +173,29 @@ from functools import partial
 
 def process_fundus_image_with_clahe(img_path, keywords, all_key, target_size):
     """Process a single fundus image with CLAHE enhancement and generate diagnostic labels"""
-    try:
-        # check imgage valid
-        if (fundus_img := cv2.imread(img_path)) is None:
-            return None, None, None
-
-        # Process keywords to generate multi-label diagnosis
-        indices = [get_index_label(key, all_key) for key in keywords]
-        indices = list(set(indices))
-        label = get_multi_label_from_keys(indices)
-
-        # CLAHE enhancement
-        clahe_img = CLAHE(img_path, target_size, 20, (10,10))
-
-        return label, os.path.basename(img_path), clahe_img
-
-    except Exception as e:
-        print(f"Error processing image {img_path}: {str(e)}")
+    # check imgage valid
+    if (fundus_img := cv2.imread(img_path)) is None:
         return None, None, None
+
+    # Process keywords to generate multi-label diagnosis
+    indices = [get_index_label(key, all_key) for key in keywords]
+    indices = list(set(indices))
+    label = get_multi_label_from_keys(indices)
+
+    # CLAHE enhancement
+    clahe_img = CLAHE(img_path, target_size, 20, (10,10))
+
+    return label, os.path.basename(img_path), clahe_img
 
 def process_patient_record_parallel(row_idx, df, left_eye_keywords, right_eye_keywords, all_key, target_size):
     """Process a single patient record (both eyes) in parallel and generate diagnostic data"""
     results = []
-    try:
-        # Process both eyes using a loop
-        for eye_side, fundus_col, keywords_col in [('Left', 'Left-Fundus', left_eye_keywords), ('Right', 'Right-Fundus', right_eye_keywords)]:
-            img_path = os.path.join(TRAINING_SOURCE_PATH, df[fundus_col][row_idx])
-            label, feature, clahe = process_fundus_image_with_clahe(img_path, keywords_col[row_idx], all_key, target_size)
-            if label is not None:
-                results.append((label, feature, clahe))
-
-    except Exception as e:
-        print(f"Error processing patient record {row_idx}: {str(e)}")
+    # Process both eyes using a loop
+    for eye_side, fundus_col, keywords_col in [('Left', 'Left-Fundus', left_eye_keywords), ('Right', 'Right-Fundus', right_eye_keywords)]:
+        img_path = os.path.join(TRAINING_SOURCE_PATH, df[fundus_col][row_idx])
+        label, feature, clahe = process_fundus_image_with_clahe(img_path, keywords_col[row_idx], all_key, target_size)
+        if label is not None:
+            results.append((label, feature, clahe))
 
     return results
 
