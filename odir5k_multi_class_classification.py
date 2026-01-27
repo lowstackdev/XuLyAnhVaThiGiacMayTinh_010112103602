@@ -249,30 +249,6 @@ for files, src, dest, name in [
         print(f"{name} {label} count: {count}")
 
 # %%
-# from pathlib import Path
-
-# training_dir = Path(TRAINING_PATH)
-# total_files = sum(len(list(subdir.glob('*'))) for subdir in training_dir.iterdir() if subdir.is_dir())
-# print(total_files)
-
-# print(len(os.listdir(TRAINING_SOURCE_PATH)))
-
-# %%
-# from PIL import Image
-
-# cataract_image_list = os.listdir(TRAINING_PATH + 'Cataract')
-# image_path = TRAINING_PATH + 'Cataract/' + cataract_image_list[2]
-# im = Image.open(image_path)
-# width, height = im.size
-# print(width, height, "from", image_path)
-
-# %%
-# img = image.load_img(image_path)
-# plt.imshow(img)
-# img = image.load_img(image_path, target_size=(int(height/16), int(width/16)), interpolation="lanczos")
-# plt.imshow(img)
-
-# %%
 TARGET_SIZE = (200, 300)  # (int(height/16), int(width/16))
 COLOR_MODE = "rgb"
 COLOR_SHAPE_MAP = {"grayscale": (1,), "rgb": (3,), "rgba": (4,)}

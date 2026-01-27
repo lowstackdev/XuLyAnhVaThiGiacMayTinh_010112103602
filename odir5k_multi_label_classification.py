@@ -170,11 +170,7 @@ def CLAHE(image_path, dim, clipLimit, tileGridSize):
 # %%
 TARGET_SIZE = (230, 230)
 COLOR_MODE = 'rgb'
-COLOR_SHAPE_MAP = {
-    'grayscale': (1,),
-    'rgb': (3,),
-    'rgba': (4,)
-}
+COLOR_SHAPE_MAP = {'grayscale': (1,), 'rgb': (3,), 'rgba': (4,)}
 SHAPE_ADD = COLOR_SHAPE_MAP.get(COLOR_MODE, (3,))
 
 # %%
@@ -194,7 +190,7 @@ from functools import partial
 def process_fundus_image_with_clahe(img_path, keywords, key_all, target_size):
     """Process a single fundus image with CLAHE enhancement and generate diagnostic labels"""
     try:
-        # Read image and check if valid
+        # check imgage valid
         if (fundus_img := cv2.imread(img_path)) is None:
             return None, None, None
 
@@ -203,7 +199,7 @@ def process_fundus_image_with_clahe(img_path, keywords, key_all, target_size):
         indices = list(set(indices))
         label = get_multi_label_from_keys(indices)
 
-        # Process image with CLAHE enhancement
+        # CLAHE enhancement
         clahe_img = CLAHE(img_path, target_size, 20, (10,10))
 
         return label, os.path.basename(img_path), clahe_img
@@ -278,11 +274,7 @@ print("n validation:", len(validation_filenames))
 
 # Approximate class weights by looking at the presence of each class (multi-label)
 train_labels_idx = np.argmax(training_labels, axis=1)
-class_weights_vals = compute_class_weight(
-    class_weight='balanced',
-    classes=np.arange(8),
-    y=train_labels_idx
-)
+class_weights_vals = compute_class_weight(class_weight='balanced', classes=np.arange(8), y=train_labels_idx)
 class_weights = dict(enumerate(class_weights_vals))
 
 del clahe_images
@@ -468,14 +460,9 @@ for key, label, loc in metrics:
 plt.show()
 
 # %%
-# %% [markdown]
-# ## Combined Testing on Test Dataset
-
-# %%
-print(f"{'File Name':<30} {'Predicted Classes':<30} {'Predicted Labels':<20}")
-
 test_list = sorted(f for f in os.listdir(TESTING_SOURCE_PATH) if f.lower().endswith(('.jpg', '.jpeg', '.png')))
 
+print(f"{'File Name':<30} {'Predicted Classes':<30} {'Predicted Labels':<20}")
 print(f"Total testing images found: {len(test_list)}")
 
 count_normal = 0
