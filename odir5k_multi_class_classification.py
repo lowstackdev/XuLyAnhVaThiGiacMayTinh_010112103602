@@ -50,15 +50,12 @@ test_df = df.copy()
 diag_cols = test_df.columns[7:]
 double_diagnosis_row = test_df[test_df[diag_cols].sum(axis=1) > 1].index.tolist()
 
-
 def get_key_diagnosis_single(col_name):
     # Get other diagnosis columns
     other_diag_cols = [col for col in diag_cols if col != col_name]
 
     # Find rows where target column == 1 AND all other diagnosis columns == 0
-    single_rows = test_df[
-        (test_df[col_name] == 1) & (test_df[other_diag_cols].sum(axis=1) == 0)
-    ].index
+    single_rows = test_df[(test_df[col_name] == 1) & (test_df[other_diag_cols].sum(axis=1) == 0)].index
 
     # Collect unique keywords from left and right eye for these rows
     key_diagnosis = []
@@ -67,7 +64,6 @@ def get_key_diagnosis_single(col_name):
         key_diagnosis.extend(right_eye_keywords[row])
 
     return list(set(key_diagnosis))
-
 
 LABEL_STRINGS = [
     "Normal",
@@ -166,9 +162,8 @@ TESTING_SOURCE_PATH = "ODIR-5K_Testing_Images/"
 
 TRAINING_PATH = "training/"
 VALIDATION_PATH = "validation/"
-TESTING_PATH = "testing/"
 
-for path in [TRAINING_PATH, VALIDATION_PATH, TESTING_PATH]:
+for path in [TRAINING_PATH, VALIDATION_PATH]:
     shutil.rmtree(path, ignore_errors=True)
     for label in LABEL_STRINGS:
         os.makedirs(os.path.join(path, label), exist_ok=True)
@@ -194,15 +189,15 @@ for f in training_source_files:
 unique_patient_ids = list(patient_to_files.keys())
 n_val_patients = int(len(unique_patient_ids) * VALIDATION_FRACTION)
 
-validation_patient_ids = sample(unique_patient_ids, n_val_patients)
-training_patient_ids = [pid for pid in unique_patient_ids if pid not in validation_patient_ids]
+# Randomly select patients for each set
+all_patient_ids = sample(unique_patient_ids, len(unique_patient_ids))
+training_patient_ids = all_patient_ids[n_val_patients:]
+validation_patient_ids = all_patient_ids[:n_val_patients]
 
 training_files = [f for pid in training_patient_ids for f in patient_to_files[pid]]
 validation_files = [f for pid in validation_patient_ids for f in patient_to_files[pid]]
-testing_files = testing_source_files
 print(f"Total training files: {len(training_files)}")
 print(f"Total validation files: {len(validation_files)}")
-print(f"Total testing files: {len(testing_files)}")
 
 # %%
 def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
@@ -226,7 +221,7 @@ def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
 
         if nrow is None:
             # If no match found, copy to the first category (Normal) as default
-            shutil.copy(source_path + file_name, os.path.join(dest_path, LABEL_STRINGS[0]))
+            # shutil.copy(source_path + file_name, os.path.join(dest_path, LABEL_STRINGS[0]))
             continue
 
         # Find matching diagnosis label
@@ -238,7 +233,6 @@ def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
 for files, src, dest, name in [
     (training_files, TRAINING_SOURCE_PATH, TRAINING_PATH, "Training"),
     (validation_files, TRAINING_SOURCE_PATH, VALIDATION_PATH, "Validation"),
-    (testing_files, TESTING_SOURCE_PATH, TESTING_PATH, "Testing"),
 ]:
     print(f"\nOrganizing {name} files...")
     organize_eye_images_by_diagnosis(files, src, dest)
@@ -402,7 +396,7 @@ model.evaluate(validation_generator)
 # %%
 test_images = []
 for label in LABEL_STRINGS:
-    label_dir = os.path.join(TESTING_PATH, label)
+    label_dir = os.path.join(TESTING_SOURCE_PATH, label)
     if os.path.exists(label_dir):
         test_images.extend((os.path.join(label_dir, f), label) for f in os.listdir(label_dir) if f.lower().endswith((".png", ".jpg", ".jpeg")))
 
