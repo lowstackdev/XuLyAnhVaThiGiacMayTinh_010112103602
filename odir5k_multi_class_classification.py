@@ -10,7 +10,6 @@ import pandas as pd
 from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn.utils import compute_class_weight
 import tensorflow as tf
-from tensorflow.keras.preprocessing import image
 
 print(tf.__version__)
 
@@ -215,27 +214,30 @@ COLOR_SHAPE_MAP = {"grayscale": (1,), "rgb": (3,), "rgba": (4,)}
 SHAPE_ADD = COLOR_SHAPE_MAP.get(COLOR_MODE, (3,))
 
 # %%
+BATCH_SIZE = 32
 # 1. Load Raw Datasets
 raw_train_ds = tf.keras.utils.image_dataset_from_directory(
     TRAINING_PATH,
     labels="inferred",
     label_mode="categorical",
     color_mode=COLOR_MODE,
-    batch_size=32,
+    batch_size=BATCH_SIZE,
     image_size=TARGET_SIZE,
     shuffle=True,
     seed=42,
-    interpolation="lanczos3")
+    interpolation="lanczos3"
+)
 
 raw_val_ds = tf.keras.utils.image_dataset_from_directory(
     VALIDATION_PATH,
     labels="inferred",
     label_mode="categorical",
     color_mode=COLOR_MODE,
-    batch_size=32,
+    batch_size=BATCH_SIZE,
     image_size=TARGET_SIZE,
     shuffle=False,
-    interpolation="lanczos3")
+    interpolation="lanczos3"
+)
 
 # 2. Define Preprocessing/Augmentation Pipeline
 augmentation_layers = tf.keras.Sequential([
@@ -283,10 +285,12 @@ N_EPOCH = 1
 LEARNING_RATE = 0.0001
 OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)  # tf.keras.optimizers.SGD(learning_rate=LEARNING_RATE)
 
-ACCURACY_SCORE = "accuracy"
-PRECISION_SCORE = tf.keras.metrics.Precision(name="precision")
-RECALL_SCORE = tf.keras.metrics.Recall(name="recall")
+ACCURACY = "accuracy"
+PRECISION = tf.keras.metrics.Precision(name="precision")
+RECALL = tf.keras.metrics.Recall(name="recall")
 AUC_VALUE = tf.keras.metrics.AUC(num_thresholds=200, curve="ROC", summation_method="interpolation", multi_label=True)
+LOSS = tf.keras.losses.CategoricalFocalCrossentropy(gamma=2.0, alpha=0.25, label_smoothing=0.1)
+F1_SCORE = tf.keras.metrics.F1Score(average='macro', name='f1_score')
 
 MODEL_DIR = PROJECT_ROOT / "Trained_Models" / "ODIR5K-Multi-Class"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -305,19 +309,29 @@ if os.path.isfile(str(MODEL_SAVE_FINAL)) and USE_PRETRAINED_MODEL:
 else:
     print("No using saved model")
     if USE_MODEL == "using custom":
-        def create_conv_block(filters, kernel_size=(3, 3), activation="relu"):
-            return [
-                tf.keras.layers.Conv2D(filters, kernel_size, activation=activation),
-                tf.keras.layers.Conv2D(filters, kernel_size, activation=activation),
-                tf.keras.layers.MaxPooling2D(2, 2),
-                tf.keras.layers.BatchNormalization()]
-
         model = tf.keras.models.Sequential([
                 tf.keras.Input(shape=INPUT_SHAPE),
-                *create_conv_block(32),
-                *create_conv_block(64),
-                *create_conv_block(128),
-                *create_conv_block(256),
+                # Block 1
+                tf.keras.layers.Conv2D(32, (3, 3), activation="relu"),
+                tf.keras.layers.Conv2D(32, (3, 3), activation="relu"),
+                tf.keras.layers.MaxPooling2D(2, 2),
+                tf.keras.layers.BatchNormalization(),
+                # Block 2
+                tf.keras.layers.Conv2D(64, (3, 3), activation="relu"),
+                tf.keras.layers.Conv2D(64, (3, 3), activation="relu"),
+                tf.keras.layers.MaxPooling2D(2, 2),
+                tf.keras.layers.BatchNormalization(),
+                # Block 3
+                tf.keras.layers.Conv2D(128, (3, 3), activation="relu"),
+                tf.keras.layers.Conv2D(128, (3, 3), activation="relu"),
+                tf.keras.layers.MaxPooling2D(2, 2),
+                tf.keras.layers.BatchNormalization(),
+                # Block 4
+                tf.keras.layers.Conv2D(256, (3, 3), activation="relu"),
+                tf.keras.layers.Conv2D(256, (3, 3), activation="relu"),
+                tf.keras.layers.MaxPooling2D(2, 2),
+                tf.keras.layers.BatchNormalization(),
+                # Classifier
                 tf.keras.layers.Flatten(),
                 tf.keras.layers.Dense(256, activation="relu"),
                 tf.keras.layers.Dense(64, activation="relu"),
@@ -325,17 +339,22 @@ else:
                 tf.keras.layers.Dense(8, activation="softmax")])
 
 model.summary(line_length=100)
-model.compile(loss="categorical_crossentropy",
-              optimizer=OPTIMIZER,
-              metrics=[ACCURACY_SCORE, PRECISION_SCORE, RECALL_SCORE, AUC_VALUE])
+
+model.compile(
+    loss=LOSS,
+    optimizer=OPTIMIZER,
+    metrics=[ACCURACY, PRECISION, RECALL, AUC_VALUE, F1_SCORE]
+)
 
 # %%
-history = model.fit(train_generator=train_generator,
-                    validation_data=validation_generator,
-                    epochs=N_EPOCH,
-                    verbose=1,
-                    class_weight=class_weights,
-                    callbacks=callbacks)
+history = model.fit(
+    train_generator,
+    validation_data=validation_generator,
+    epochs=N_EPOCH,
+    verbose=1,
+    class_weight=class_weights,
+    callbacks=callbacks
+)
 
 # %%
 model.save_weights(MODEL_SAVE_WEIGHTS)
@@ -378,8 +397,8 @@ print(header)
 print(separator)
 
 for img_path, true_label in test_images:
-    img = image.load_img(img_path, target_size=TARGET_SIZE)
-    img_array = image.img_to_array(img)
+    img = tf.keras.preprocessing.image.load_img(img_path, target_size=TARGET_SIZE)
+    img_array = tf.keras.preprocessing.image.img_to_array(img)
     img_array = np.expand_dims(img_array, axis=0)
 
     classes = model.predict(img_array, batch_size=8, verbose=0)

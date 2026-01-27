@@ -311,23 +311,6 @@ train_generator = prepare_dataset(training_features, training_labels, batch_size
 validation_generator = prepare_dataset(validation_features, validation_labels, batch_size=BATCH_SIZE)
 
 # %%
-@tf.function
-def accuracy_multilabel(y, y_hat):
-    y_float = tf.cast(y, tf.float32)
-    y_hat = tf.round(y_hat)
-    correct_prediction = tf.equal(y_hat, y_float)
-    # mean
-    correct_prediction = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-    return correct_prediction
-
-@tf.function
-def multilabel_cross_entropy(y, y_hat):
-    # cross_entropy = -tf.reduce_sum(((y * tf.math.log(y_hat + 1e-9)) + ((1-y) * tf.math.log(1 - y_hat + 1e-9)) ), name='xentropy')
-    # cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(labels=y, logits=y_hat, name="sigmoid_cross_entropy_with_logits")
-    cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(logits=y_hat, labels=tf.cast(y,tf.float32))
-    loss = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=1))
-    return loss
-
 USE_MODEL = "using custom"
 USE_PRETRAINED_MODEL = False
 
@@ -337,10 +320,10 @@ LEARNING_RATE = 1e-4
 LOSS = "binary_crossentropy"
 OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)
 
-ACCURACY_SCORE = 'accuracy_multilabel'
+ACCURACY = tf.keras.metrics.BinaryAccuracy(name='binary_accuracy')
 AUC_VALUE = tf.keras.metrics.AUC(name='auc_value', curve='ROC', summation_method='interpolation', multi_label=True)
-PRECISION_SCORE = tf.keras.metrics.Precision(thresholds=0.5, name='precision')
-RECALL_SCORE = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
+PRECISION = tf.keras.metrics.Precision(thresholds=0.5, name='precision')
+RECALL = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
 
 MODEL_DIR = PROJECT_ROOT / "Trained_Models" / "ODIR-5K-Multi-Label"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -361,57 +344,74 @@ if os.path.isfile(str(MODEL_SAVE_FINAL)) and USE_PRETRAINED_MODEL:
 else:
     print("No using saved model")
     if USE_MODEL == "using custom":
-        from tensorflow.keras.layers import Conv2D, MaxPooling2D, BatchNormalization, Flatten, Dense, Dropout
         inputs = tf.keras.Input(shape=INPUT_SHAPE)
 
         # Conv larger kernel
-        x = Conv2D(32, (7,7), padding='same', activation='relu')(inputs)
-        x = BatchNormalization()(x)
-        x = MaxPooling2D(2,2)(x)
+        x = tf.keras.layers.Conv2D(32, (7,7), padding='same', activation='relu')(inputs)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.MaxPooling2D(2,2)(x)
 
-        # Residual blocks
-        for filters in [64, 128, 256]:
-            # Shortcut
-            shortcut = Conv2D(filters, (1,1), padding='same')(x) if x.shape[-1] != filters else x
+        # Block 1
+        shortcut_64 = tf.keras.layers.Conv2D(64, (1,1), padding='same')(x) if x.shape[-1] != 64 else x
+        x = tf.keras.layers.Conv2D(64, (3,3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.Conv2D(64, (3,3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.Add()([x, shortcut_64])
+        x = tf.keras.layers.Activation('relu')(x)
+        x = tf.keras.layers.MaxPooling2D(2,2)(x)
 
-            # Conv block
-            x = Conv2D(filters, (3,3), padding='same', activation='relu')(x)
-            x = BatchNormalization()(x)
-            x = Conv2D(filters, (3,3), padding='same', activation='relu')(x)
-            x = BatchNormalization()(x)
+        # Block 2
+        shortcut_128 = tf.keras.layers.Conv2D(128, (1,1), padding='same')(x) if x.shape[-1] != 128 else x
+        x = tf.keras.layers.Conv2D(128, (3,3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.Conv2D(128, (3,3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.Add()([x, shortcut_128])
+        x = tf.keras.layers.Activation('relu')(x)
+        x = tf.keras.layers.MaxPooling2D(2,2)(x)
 
-            # Add shortcut
-            x = tf.keras.layers.Add()([x, shortcut])
-            x = tf.keras.layers.Activation('relu')(x)
-            x = MaxPooling2D(2,2)(x)
+        # Block 3
+        shortcut_256 = tf.keras.layers.Conv2D(256, (1,1), padding='same')(x) if x.shape[-1] != 256 else x
+        x = tf.keras.layers.Conv2D(256, (3,3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.Conv2D(256, (3,3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.Add()([x, shortcut_256])
+        x = tf.keras.layers.Activation('relu')(x)
+        x = tf.keras.layers.MaxPooling2D(2,2)(x)
 
         x = tf.keras.layers.GlobalAveragePooling2D()(x)
-        x = Dropout(0.5)(x)
+        x = tf.keras.layers.Dropout(0.5)(x)
 
         # Dense
-        x = Dense(256, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(x)
-        x = BatchNormalization()(x)
-        x = Dropout(0.5)(x)
+        x = tf.keras.layers.Dense(256, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.Dropout(0.5)(x)
 
-        x = Dense(128, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(x)
-        x = Dropout(0.5)(x)
+        x = tf.keras.layers.Dense(128, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001))(x)
+        x = tf.keras.layers.Dropout(0.5)(x)
 
-        outputs = Dense(8, activation='sigmoid')(x)
+        outputs = tf.keras.layers.Dense(8, activation='sigmoid')(x)
 
         model = tf.keras.Model(inputs=inputs, outputs=outputs)
 
 model.summary(line_length=100)
-model.compile(loss=LOSS,
-              optimizer=OPTIMIZER,
-              metrics=[ACCURACY_SCORE, AUC_VALUE, PRECISION_SCORE, RECALL_SCORE])
+model.compile(
+    loss=LOSS,
+    optimizer=OPTIMIZER,
+    metrics=[ACCURACY, AUC_VALUE, PRECISION, RECALL]
+)
 
 # %%
-history = model.fit(train_generator=train_generator,
-                    validation_data=validation_generator,
-                    epochs=N_EPOCH,
-                    class_weight=class_weights,
-                    verbose=1,
-                    callbacks=callbacks)
+history = model.fit(
+    train_generator,
+    validation_data=validation_generator,
+    epochs=N_EPOCH,
+    verbose=1,
+    class_weight=class_weights,
+    callbacks=callbacks
+)
 
 # %%
 model.save_weights(MODEL_SAVE_WEIGHTS)
@@ -419,7 +419,7 @@ model.save(MODEL_SAVE_FINAL)
 
 # %%
 metrics = [
-    ('accuracy_multilabel', 'accuracy', 0),
+    ('binary_accuracy', 'accuracy', 0),
     ('loss', 'loss', 1),
     ('auc_value', 'AUC value', 3),
     ('precision', 'Precision', 2),
