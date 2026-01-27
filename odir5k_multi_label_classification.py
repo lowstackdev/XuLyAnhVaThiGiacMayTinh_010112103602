@@ -1,5 +1,6 @@
 # %%
 import os
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,13 +13,14 @@ import tensorflow as tf
 print(tf.__version__)
 
 # %%
-os.chdir('ODIR-5K')
+PROJECT_ROOT = Path(__file__).parent.resolve()
+# PROJECT_ROOT = '/content/drive/MyDrive/Colab Notebooks'
+DATASET_DIR = PROJECT_ROOT / "ODIR-5K"
+os.chdir(DATASET_DIR)
 
 # %%
-from pandas import read_excel
-
 FILE_NAME = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
-df = read_excel(FILE_NAME)
+df = pd.read_excel(FILE_NAME)
 print(df.head())
 
 # %%
@@ -138,6 +140,10 @@ while True:
     break
 
 # %%
+TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images/'
+TESTING_SOURCE_PATH = 'ODIR-5K_Testing_Images/'
+
+# %%
 # Define method for image resize, cropping and image Contrast Limited Adaptive Histogram Equalization (CLAHE)
 # using Opencv 4
 
@@ -212,7 +218,7 @@ def process_patient_record_parallel(row_idx, df, left_eye_keywords, right_eye_ke
     try:
         # Process both eyes using a loop
         for eye_side, fundus_col, keywords_col in [('Left', 'Left-Fundus', left_eye_keywords), ('Right', 'Right-Fundus', right_eye_keywords)]:
-            img_path = os.path.join('ODIR-5K_Training_Images', df[fundus_col][row_idx])
+            img_path = os.path.join(TRAINING_SOURCE_PATH, df[fundus_col][row_idx])
             label, feature, clahe = process_fundus_image_with_clahe(img_path, keywords_col[row_idx], key_all, target_size)
             if label is not None:
                 results.append((label, feature, clahe))
@@ -256,34 +262,19 @@ synthetic_labels = np.asarray(synthetic_labels)
 # Grouping by patient ID to prevent data leakage (same patient's eyes in different sets)
 groups = [f.split('_')[0] for f in synthetic_features]
 
-# First split: Training vs (Validation + Test)
-gss1 = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=1)
-train_idx, val_tmp_idx = next(gss1.split(clahe_images, synthetic_labels, groups=groups))
+gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=1)
+train_idx, val_idx = next(gss.split(clahe_images, synthetic_labels, groups=groups))
 
 training_features = clahe_images[train_idx]
 training_labels = synthetic_labels[train_idx]
 training_filenames = [synthetic_features[i] for i in train_idx]
 
-tmp_validation_features = clahe_images[val_tmp_idx]
-tmp_validation_labels = synthetic_labels[val_tmp_idx]
-tmp_validation_filenames = [synthetic_features[i] for i in val_tmp_idx]
-tmp_validation_groups = [groups[i] for i in val_tmp_idx]
-
-# Second split: Validation vs Validation Test
-gss2 = GroupShuffleSplit(n_splits=1, test_size=0.5, random_state=1)
-val_idx, test_idx = next(gss2.split(tmp_validation_features, tmp_validation_labels, groups=tmp_validation_groups))
-
-validation_features = tmp_validation_features[val_idx]
-validation_labels = tmp_validation_labels[val_idx]
-validation_filenames = [tmp_validation_filenames[i] for i in val_idx]
-
-validation_test_features = tmp_validation_features[test_idx]
-validation_test_labels = tmp_validation_labels[test_idx]
-validation_test_filenames = [tmp_validation_filenames[i] for i in test_idx]
+validation_features = clahe_images[val_idx]
+validation_labels = synthetic_labels[val_idx]
+validation_filenames = [synthetic_features[i] for i in val_idx]
 
 print("n training:", len(training_filenames))
 print("n validation:", len(validation_filenames))
-print("n validation test:", len(validation_test_filenames))
 
 # Approximate class weights by looking at the presence of each class (multi-label)
 train_labels_idx = np.argmax(training_labels, axis=1)
@@ -293,14 +284,9 @@ class_weights_vals = compute_class_weight(
     y=train_labels_idx
 )
 class_weights = dict(enumerate(class_weights_vals))
-print("Class weights:", class_weights)
 
-# Delete temporary list file for minimalizing memory usage
 del clahe_images
 del synthetic_labels
-del tmp_validation_features
-del tmp_validation_labels
-del tmp_validation_filenames
 
 # %%
 def display_image_samples(features, title, color_mode, target_size):
@@ -328,14 +314,14 @@ augmentation_layers = tf.keras.Sequential([
     tf.keras.layers.RandomRotation(factor=0.0833, fill_mode='nearest'),  # ±30 degrees
     tf.keras.layers.RandomZoom(height_factor=0.15, width_factor=0.15, fill_mode='nearest'),
     tf.keras.layers.RandomBrightness(factor=0.1),  # Adjust brightness
-    tf.keras.layers.RandomContrast(factor=0.1),       # Adjust contrast
+    tf.keras.layers.RandomContrast(factor=0.1),    # Adjust contrast
     tf.keras.layers.GaussianNoise(0.01),
 ])
 
 rescaling_layer = tf.keras.layers.Rescaling(1./255)
 
-def prepare_dataset(features, labels, augment=False):
-    # Create dataset from numpy arrays
+# 2. Prepare Dataset for training and validation
+def prepare_dataset(features, labels, batch_size=32, augment=False):
     ds = tf.data.Dataset.from_tensor_slices((features, labels))
 
     # Apply rescaling (features are 0-255 numpy arrays from CLAHE processing)
@@ -345,68 +331,26 @@ def prepare_dataset(features, labels, augment=False):
     ds = ds.cache()
 
     if augment:
-        # Shuffle, repeat, and apply augmentations only to training
+        # Shuffle and apply augmentations only to training
         ds = ds.shuffle(buffer_size=min(len(features), 1000))
-        ds = ds.repeat()
+        # ds = ds.repeat() # Removed to allow automatic step calculation
         ds = ds.map(lambda x, y: (augmentation_layers(x, training=True), y),
                     num_parallel_calls=tf.data.AUTOTUNE)
 
-    # Batch and prefetch for performance
-    return ds.batch(32).prefetch(buffer_size=tf.data.AUTOTUNE)
+    return ds.batch(batch_size).prefetch(buffer_size=tf.data.AUTOTUNE)
 
-train_generator = prepare_dataset(training_features, training_labels, augment=True)
-validation_generator = prepare_dataset(validation_features, validation_labels)
+BATCH_SIZE = 32
+train_generator = prepare_dataset(training_features, training_labels, batch_size=BATCH_SIZE, augment=True)
+validation_generator = prepare_dataset(validation_features, validation_labels, batch_size=BATCH_SIZE)
 
 # %%
-USE_MODEL = "using custom"
-USE_PRETRAINED_MODEL = False
-INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
-
-N_EPOCH = 50
-LEARNING_RATE = 1e-4
-LOSS = "binary_crossentropy"
-OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)
-
-MODEL_PATH = 'Trained_Models/ODIR-5K-Multi-Label/'
-MODEL_SAVE_WEIGHTS = 'weight.h5'
-MODEL_SAVE_NAME_H5 = 'ODIR5K.h5'
-
-CHECKPOINT_PATH = MODEL_PATH + 'ODIR5K.keras'
-
-AUC_VALUE = tf.keras.metrics.AUC(name='auc_value', curve='ROC', summation_method='interpolation', multi_label=True)
-PRECISION_SCORE = tf.keras.metrics.Precision(thresholds=0.5, name='precision')
-RECALL_SCORE = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
-
-callbacks = [
-  tf.keras.callbacks.EarlyStopping(
-    monitor='val_loss',
-    patience=10,
-    restore_best_weights=True
-  ),
-  tf.keras.callbacks.ModelCheckpoint(
-    CHECKPOINT_PATH,
-    monitor='val_auc',
-    save_best_only=True,
-    mode='max',
-    verbose=1
-  ),
-  tf.keras.callbacks.ReduceLROnPlateau(
-    monitor='val_loss',
-    factor=0.5,
-    patience=5,
-    verbose=1
-  )
-]
-
 @tf.function
 def accuracy_multilabel(y, y_hat):
-    correct_prediction = tf.equal(tf.round(y_hat), tf.cast(y, tf.float32))
-    # correct_prediction = tf.equal(tf.round(tf.nn.sigmoid(y_hat)), tf.round(y))
+    y_float = tf.cast(y, tf.float32)
+    y_hat = tf.round(y_hat)
+    correct_prediction = tf.equal(y_hat, y_float)
     # mean
     correct_prediction = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-    # all
-    # all_labels_true = tf.reduce_min(tf.cast(correct_prediction, tf.float32), 1)
-    # correct_prediction = tf.reduce_mean(all_labels_true)
     return correct_prediction
 
 @tf.function
@@ -417,10 +361,36 @@ def multilabel_cross_entropy(y, y_hat):
     loss = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=1))
     return loss
 
+USE_MODEL = "using custom"
+USE_PRETRAINED_MODEL = False
+INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
+
+N_EPOCH = 1
+LEARNING_RATE = 1e-4
+LOSS = "binary_crossentropy"
+OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)
+
+ACCURACY_SCORE = 'accuracy_multilabel'
+AUC_VALUE = tf.keras.metrics.AUC(name='auc_value', curve='ROC', summation_method='interpolation', multi_label=True)
+PRECISION_SCORE = tf.keras.metrics.Precision(thresholds=0.5, name='precision')
+RECALL_SCORE = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
+
+MODEL_DIR = PROJECT_ROOT / "Trained_Models" / "ODIR-5K-Multi-Label"
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
+MODEL_SAVE_WEIGHTS = str(MODEL_DIR / 'ODIR5K_weights.weights.h5')
+MODEL_SAVE_FINAL = str(MODEL_DIR / 'ODIR5K_final.keras')
+CHECKPOINT_PATH = str(MODEL_DIR / 'ODIR5K.keras')
+
+callbacks = [
+  tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True),
+  tf.keras.callbacks.ModelCheckpoint(CHECKPOINT_PATH, monitor='val_auc_value', save_best_only=True, mode='max', verbose=1),
+  tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1)
+]
+
 # %%
-if os.path.isfile(MODEL_PATH + MODEL_SAVE_NAME_H5) and USE_PRETRAINED_MODEL:
-    print("Using h5")
-    model = tf.keras.models.load_model(MODEL_PATH + MODEL_SAVE_NAME_H5)
+if os.path.isfile(str(MODEL_SAVE_FINAL)) and USE_PRETRAINED_MODEL:
+    print("Using saved model")
+    model = tf.keras.models.load_model(str(MODEL_SAVE_FINAL))
 else:
     print("No using saved model")
     if USE_MODEL == "using custom":
@@ -466,10 +436,10 @@ else:
 model.summary(line_length=100)
 model.compile(loss=LOSS,
               optimizer=OPTIMIZER,
-              metrics=[accuracy_multilabel, AUC_VALUE, PRECISION_SCORE, RECALL_SCORE])
+              metrics=[ACCURACY_SCORE, AUC_VALUE, PRECISION_SCORE, RECALL_SCORE])
 
 # %%
-history = model.fit(train_generator,
+history = model.fit(train_generator=train_generator,
                     validation_data=validation_generator,
                     epochs=N_EPOCH,
                     class_weight=class_weights,
@@ -477,14 +447,14 @@ history = model.fit(train_generator,
                     callbacks=callbacks)
 
 # %%
-model.save_weights(MODEL_PATH + MODEL_SAVE_WEIGHTS)
-model.save(MODEL_PATH + MODEL_SAVE_NAME_H5)
+model.save_weights(MODEL_SAVE_WEIGHTS)
+model.save(MODEL_SAVE_FINAL)
 
 # %%
 metrics = [
     ('accuracy_multilabel', 'accuracy', 0),
     ('loss', 'loss', 1),
-    ('auc', 'AUC value', 3),
+    ('auc_value', 'AUC value', 3),
     ('precision', 'Precision', 2),
     ('recall', 'Recall', 4)
 ]
@@ -498,19 +468,23 @@ for key, label, loc in metrics:
 plt.show()
 
 # %%
-TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images/'
-TESTING_SOURCE_PATH = 'ODIR-5K_Tesing_Images/'
+# %% [markdown]
+# ## Combined Testing on Test Dataset
 
-# output = tf.metrics.MultiLabelConfusionMatrix(num_classes=8)
-print("\nVALIDATION TEST RESULTS")
-print(f"{'File Name':<30} {'True Label':<15} {'Predicted':<15} {'Accuracy':<10}")
+# %%
+print(f"{'File Name':<30} {'Predicted Classes':<30} {'Predicted Labels':<20}")
 
-count_true = 0
-count_half = 0
-count_zero = 0
+test_list = sorted(f for f in os.listdir(TESTING_SOURCE_PATH) if f.lower().endswith(('.jpg', '.jpeg', '.png')))
 
-for i in range(len(validation_test_filenames)):
-    source = TRAINING_SOURCE_PATH + validation_test_filenames[i]
+print(f"Total testing images found: {len(test_list)}")
+
+count_normal = 0
+count_single_disease = 0
+count_multiple_diseases = 0
+count_no_disease = 0
+
+for i in range(len(test_list)):
+    source = os.path.join(TESTING_SOURCE_PATH, test_list[i])
     img = CLAHE(source, TARGET_SIZE, 20, (10,10))
     img_array = tf.keras.preprocessing.image.img_to_array(img)
     img_array = np.expand_dims(img_array, axis=0)
@@ -518,34 +492,25 @@ for i in range(len(validation_test_filenames)):
     images = np.vstack([img_array])
     predict = model.predict(images)
     predict = predict.reshape(8)
-    predict = tf.cast(predict >= 0.5, np.int32)
-    y_true = tf.constant(validation_test_labels[i], dtype=tf.int32)
-    y_pred = tf.constant(predict.numpy(), dtype=tf.int32)
-    acc_ml = accuracy_multilabel(y_true, y_pred).numpy()
+    predicted_labels = (predict >= 0.5).astype(int)
 
-    # Count results
-    count_true = count_true + 1 if acc_ml == 1.0 else count_true
-    count_half = count_half + 1 if 0.75 <= acc_ml < 1 and 1 in predict.numpy().tolist() else count_half
-    count_zero = count_zero + 1 if 1 not in predict.numpy().tolist() else count_zero
+    # Count prediction patterns
+    num_pos = np.sum(predicted_labels)
+    if num_pos == 0: count_no_disease += 1
+    elif num_pos > 1: count_multiple_diseases += 1
+    elif predicted_labels[0]: count_normal += 1
+    else: count_single_disease += 1
+
+    # Get labels description
+    active_labels = [s for s, p in zip(LABEL_STRINGS, predicted_labels) if p] or ["None"]
 
     # Format and display results
     filename = os.path.basename(source)
-    true_label = str(validation_test_labels[i])
-    predicted = str(predict.numpy())
-    accuracy = f"{acc_ml:.3f}"
+    predicted_str = str(predicted_labels)
+    labels_str = ', '.join(active_labels)
 
-    print(f"{filename:<30} {true_label:<15} {predicted:<15} {accuracy:<10}")
+    print(f"{filename:<30} {labels_str:<30} {predicted_str:<20}")
 
-print(f"\nResults Summary: True: {count_true} | Half True: {count_half} | Zero: {count_zero}")
-
-test_list = os.listdir(TESTING_SOURCE_PATH)
-test_list.sort()
-for i in range(0, len(test_list), 5):
-    source = TESTING_SOURCE_PATH + test_list[i]
-    img = CLAHE(source, TARGET_SIZE, 20, (10,10))
-    img_array = tf.keras.preprocessing.image.img_to_array(img)
-    img_array = np.expand_dims(img_array, axis=0)
-    images = np.vstack([img_array]) / 255
-    classes = model.predict(images)
-    classes = tf.cast(classes > 0.5, float)
-    print(source, classes)
+print(f"\nTest Results Summary:")
+print(f"Total Tested: {len(test_list)}")
+print(f"Normal: {count_normal} | Single Disease: {count_single_disease} | Multiple Diseases: {count_multiple_diseases} | No Disease Detected: {count_no_disease}")
