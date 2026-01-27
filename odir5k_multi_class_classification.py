@@ -63,20 +63,20 @@ print("All keys:", sum(len(x) for x in all_key_single_label))
 for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
 
 # %%
-all_key_sets = [set(keywords) for keywords in all_key_single_label]
+# all_key_sets = [set(keywords) for keywords in all_key_single_label]
 
-# Remove "normal" keyword from all groups
-normal_keywords = all_key_sets[0]
-all_key_sets[1:-1] = [keywords - normal_keywords for keywords in all_key_sets[1:-1]]
+# # Remove "normal" keyword from all groups
+# normal_keywords = all_key_sets[0]
+# all_key_sets[1:-1] = [keywords - normal_keywords for keywords in all_key_sets[1:-1]]
 
-# Remove duplicate keywords between groups
-for i, current in enumerate(all_key_sets):
-    for next in all_key_sets[i + 1 :]:
-        next -= current & next
+# # Remove duplicate keywords between groups
+# for i, current in enumerate(all_key_sets):
+#     for next in all_key_sets[i + 1 :]:
+#         next -= current & next
 
-all_key_single_label = [list(keywords) for keywords in all_key_sets]
-print("Total intersected:", sum(len(x) for x in all_key_single_label))
-for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
+# all_key_single_label = [list(keywords) for keywords in all_key_sets]
+# print("Total intersected:", sum(len(x) for x in all_key_single_label))
+# for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
 
 # %%
 # double_diagnosis_row = test_df[test_df[LABEL_COLS].sum(axis=1) > 1].index.tolist()
@@ -189,15 +189,14 @@ def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
                 break
 
         if nrow is None:
-            # If no match found, copy to the first category (Normal) as default
-            # shutil.copy(source_path + file_name, os.path.join(dest_path, LABEL_STRINGS[0]))
             continue
 
         # Find matching diagnosis label
-        for key_list, label_dir in label_mapping:
-            if any(keyword in key_list for keyword in keywords_data[nrow]):
-                shutil.copy(source_path + file_name, os.path.join(dest_path, label_dir))
-                break
+        for keyword in keywords_data[nrow]:
+            for key_list, label_dir in label_mapping:
+                if keyword in key_list:
+                    shutil.copy(source_path + file_name, os.path.join(dest_path, label_dir))
+                    break
 
 for files, src, dest, name in [
     (training_files, TRAINING_SOURCE_PATH, TRAINING_PATH, "Training"),
