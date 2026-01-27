@@ -29,132 +29,101 @@ print(df.head())
 left_eye_keywords = df["Left-Diagnostic Keywords"].copy()
 right_eye_keywords = df["Right-Diagnostic Keywords"].copy()
 
-left_eye_keywords = left_eye_keywords.str.split("，").apply(lambda x: list(set(x)))
-right_eye_keywords = right_eye_keywords.str.split("，").apply(lambda x: list(set(x)))
-
-print(left_eye_keywords[2])
+left_eye_keywords = left_eye_keywords.str.split("，")
+right_eye_keywords = right_eye_keywords.str.split("，")
 
 # %%
-mlb = MultiLabelBinarizer()
+# mlb = MultiLabelBinarizer()
 
-combined_keywords = pd.concat([left_eye_keywords, right_eye_keywords])
-mlb.fit(combined_keywords)
+# combined_keywords = pd.concat([left_eye_keywords, right_eye_keywords])
+# mlb.fit(combined_keywords)
 
-all_diagnosis = list(mlb.classes_)
-print("Total different keys diagnosis:", len(all_diagnosis))
+# all_diagnosis = list(mlb.classes_)
+# print("All diagnosis keys:", all_diagnosis)
+# print("Total different keys diagnosis:", len(all_diagnosis))
 
 # %%
 test_df = df.copy()
-
-# Compute double_diagnosis_row once (rows with multiple diagnoses)
-diag_cols = test_df.columns[7:]
-double_diagnosis_row = test_df[test_df[diag_cols].sum(axis=1) > 1].index.tolist()
+LABEL_COLS = test_df.columns[7:]
 
 def get_key_diagnosis_single(col_name):
     # Get other diagnosis columns
-    other_diag_cols = [col for col in diag_cols if col != col_name]
+    other_diag_cols = [col for col in LABEL_COLS if col != col_name]
 
     # Find rows where target column == 1 AND all other diagnosis columns == 0
     single_rows = test_df[(test_df[col_name] == 1) & (test_df[other_diag_cols].sum(axis=1) == 0)].index
 
-    # Collect unique keywords from left and right eye for these rows
-    key_diagnosis = []
-    for row in single_rows:
-        key_diagnosis.extend(left_eye_keywords[row])
-        key_diagnosis.extend(right_eye_keywords[row])
+    unique_keywords = set().union(*[set(left_eye_keywords[row]) | set(right_eye_keywords[row]) for row in single_rows])
 
-    return list(set(key_diagnosis))
+    return list(unique_keywords)
 
-LABEL_STRINGS = [
-    "Normal",
-    "Diabetes",
-    "Glaucoma",
-    "Cataract",
-    "AMD",
-    "Hypertension",
-    "Myopia",
-    "Abnormalities",
-]
-key_all = [get_key_diagnosis_single(test_df.columns[7 + i]) for i in range(8)]
-
-for i in range(8):
-    print(LABEL_STRINGS[i], len(key_all[i]))
+LABEL_STRINGS = ['Normal', 'Diabetes', 'Glaucoma', 'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Abnormalities']
+all_key_single_label = [get_key_diagnosis_single(test_df.columns[7 + i]) for i in range(len(LABEL_STRINGS))]
+print("All keys:", sum(len(x) for x in all_key_single_label))
+for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
 
 # %%
-key_all_sets = [set(keywords) for keywords in key_all]
+all_key_sets = [set(keywords) for keywords in all_key_single_label]
 
 # Remove "normal" keyword from all groups
-normal_keywords = key_all_sets[0]
-key_all_sets[1:] = [keywords - normal_keywords for keywords in key_all_sets[1:]]
+normal_keywords = all_key_sets[0]
+all_key_sets[1:-1] = [keywords - normal_keywords for keywords in all_key_sets[1:-1]]
 
 # Remove duplicate keywords between groups
-for i, keywords_i in enumerate(key_all_sets):
-    for keywords_j in key_all_sets[i + 1 :]:
-        keywords_j -= keywords_i & keywords_j
+for i, current in enumerate(all_key_sets):
+    for next in all_key_sets[i + 1 :]:
+        next -= current & next
 
-# Convert back to list
-key_all[:] = [list(keywords) for keywords in key_all_sets]
-
-# Print results
-print("Intersected:")
-for i in range(len(key_all)):
-    print(LABEL_STRINGS[i], len(key_all[i]))
+all_key_single_label = [list(keywords) for keywords in all_key_sets]
+print("Total intersected:", sum(len(x) for x in all_key_single_label))
+for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
 
 # %%
-def get_all_recognized_key(key_all):
-    return list(set([keyword for keywords in key_all for keyword in set(keywords)]))
+# double_diagnosis_row = test_df[test_df[LABEL_COLS].sum(axis=1) > 1].index.tolist()
+# double_diagnosis_row = sorted(set(double_diagnosis_row))
+# not_listed = {keyword
+#               for row in double_diagnosis_row
+#               for keyword in left_eye_keywords[row] + right_eye_keywords[row] if keyword not in all_key_single_label}
 
-all_key_diagnosis = get_all_recognized_key(key_all)
-print("Total unique keywords:", len(all_key_diagnosis))
+# print("Double label row:", len(double_diagnosis_row))
+# print("Not listed diagnosis key:", len(not_listed))
 
-# %%
-double_diagnosis_row = sorted(set(double_diagnosis_row))
-print("Double label row:", len(double_diagnosis_row))
+# def get_all_recognized_key(all_key):
+#     return list(set([keyword for keywords in all_key for keyword in set(keywords)]))
 
-# %%
-all_known_keywords = set().union(*key_all)
-not_listed = {
-    keyword
-    for row in double_diagnosis_row
-    for keyword in left_eye_keywords[row] + right_eye_keywords[row]
-    if keyword not in all_known_keywords
-}
-print("Not listed diagnosis key:", len(not_listed))
+# def intersect_from_multi_label(keyword_groups):
+#     known_keywords = set().union(*keyword_groups)
+#     unrecognized_keywords = set()
 
-# %%
-def intersect_from_multi_label(keyword_groups):
-    known_keywords = set().union(*keyword_groups)
-    unrecognized_keywords = set()
+#     for record_idx in double_diagnosis_row:
+#         keywords = left_eye_keywords[record_idx] + right_eye_keywords[record_idx]
+#         undiscovered = set(kw for kw in keywords if kw not in known_keywords)
 
-    for record_idx in double_diagnosis_row:
-        keywords = left_eye_keywords[record_idx] + right_eye_keywords[record_idx]
-        undiscovered = set(kw for kw in keywords if kw not in known_keywords)
+#         if undiscovered:
+#             related_groups = [
+#                 col_idx - 7
+#                 for col_idx in range(7, len(test_df.columns))
+#                 if test_df.iloc[record_idx, col_idx] == 1
+#             ]
 
-        if undiscovered:
-            related_groups = [
-                col_idx - 7
-                for col_idx in range(7, len(test_df.columns))
-                if test_df.iloc[record_idx, col_idx] == 1
-            ]
+#             if len(related_groups) == 1 and len(undiscovered) == 1:
+#                 keyword_groups[related_groups[0]].append(undiscovered.pop())
+#                 known_keywords.add(keyword_groups[related_groups[0]][-1])
+#             else:
+#                 unrecognized_keywords.update(undiscovered)
 
-            if len(related_groups) == 1 and len(undiscovered) == 1:
-                keyword_groups[related_groups[0]].append(undiscovered.pop())
-                known_keywords.add(keyword_groups[related_groups[0]][-1])
-            else:
-                unrecognized_keywords.update(undiscovered)
+#     return keyword_groups, list(unrecognized_keywords)
 
-    return keyword_groups, list(unrecognized_keywords)
-
-# Process until convergence
-prev_count = 0
-while True:
-    prev_count = len(all_key_diagnosis)
-    key_all, unrecognized_keywords_list = intersect_from_multi_label(key_all)
-    all_key_diagnosis = get_all_recognized_key(key_all)
-    print(unrecognized_keywords_list)
-    if len(all_key_diagnosis) == prev_count:
-        print(True)
-        break
+# # Process until convergence
+# prev_count = 0
+# while True:
+#     prev_count = len(all_key_diagnosis)
+#     all_key_single_label, unrecognized_keywords_list = intersect_from_multi_label(all_key_single_label)
+#     all_key_diagnosis = get_all_recognized_key(all_key_single_label)
+#     print(unrecognized_keywords_list)
+#     if len(all_key_diagnosis) == prev_count:
+#         print(True)
+#         break
 
 # %%
 TRAINING_SOURCE_PATH = "ODIR-5K_Training_Images/"
@@ -170,9 +139,9 @@ for path in [TRAINING_PATH, VALIDATION_PATH]:
 
 # %%
 training_source_files = os.listdir(TRAINING_SOURCE_PATH)
-print(f"Total training source images: {len(training_source_files)}")
-
 testing_source_files = os.listdir(TESTING_SOURCE_PATH)
+
+print(f"Total training source images: {len(training_source_files)}")
 print(f"Total testing source images: {len(testing_source_files)}")
 
 VALIDATION_FRACTION = 0.1
@@ -202,7 +171,7 @@ print(f"Total validation files: {len(validation_files)}")
 # %%
 def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
     "Organize eye images into diagnosis-specific directories based on keywords"
-    label_mapping = list(zip(key_all, LABEL_STRINGS))
+    label_mapping = list(zip(all_key_single_label, LABEL_STRINGS))
 
     for file_name in file_list:
         # Find matching row in the dataframe
