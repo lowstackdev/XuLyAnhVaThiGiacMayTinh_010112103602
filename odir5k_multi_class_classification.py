@@ -276,36 +276,17 @@ raw_val_ds = tf.keras.utils.image_dataset_from_directory(
     interpolation="lanczos3"
 )
 
-augmentation_layers = tf.keras.Sequential([
-    # 1. GEOMETRIC TRANSFORMATIONS (limited)
-    tf.keras.layers.RandomRotation(factor=0.1, fill_mode="nearest"),  # ±36 degrees
-    tf.keras.layers.RandomZoom(height_factor=0.15, width_factor=0.15, fill_mode="nearest"),  # zoom
-    tf.keras.layers.RandomTranslation(height_factor=0.05, width_factor=0.05, fill_mode="nearest"),  # 5%
-    # 2. PHOTOMETRIC TRANSFORMATIONS (important)
-    tf.keras.layers.RandomBrightness(factor=0.15, value_range=(0, 1)),  # 15%
-    tf.keras.layers.RandomContrast(factor=0.15),  # 15% contrast variation
-    # 3. NOISE & ARTIFACTS (real-world simulation)
-    tf.keras.layers.GaussianNoise(stddev=0.01),  # noise
-    # 4. BLUR (simulating focus issues)
-    tf.keras.layers.RandomZoom(height_factor=(-0.02, 0.02), width_factor=(-0.02, 0.02), fill_mode="nearest"),  # blur effect
-])
-
-rescaling_layer = tf.keras.layers.Rescaling(1.0 / 255)
-
 def preprocess_raw_dataset(ds, name):
-    ds = ds.map(lambda x, y: (rescaling_layer(x), y), num_parallel_calls=tf.data.AUTOTUNE)
-
     cache_dir = config.CACHE_DIR / 'preprocess_raw_dataset'
     cache_dir.mkdir(parents=True, exist_ok=True)
-
-    for lockfile in cache_dir.glob(f"{name}*.lockfile"):
-        try: os.remove(lockfile)
-        except: pass
+    for lockfile in cache_dir.glob("*.lockfile"):
+        try: lockfile.unlink(missing_ok=True)
+        except Exception: pass
 
     cache_path = str(cache_dir / name)
     ds = ds.cache(cache_path)
 
-    ds.ignore_errors().prefetch(tf.data.AUTOTUNE).enumerate().reduce(np.int64(0), lambda x, _: x + 1)
+    # ds.ignore_errors().prefetch(tf.data.AUTOTUNE).enumerate().reduce(np.int64(0), lambda x, _: x + 1)
 
     return ds
 
@@ -337,7 +318,6 @@ train_generator = (
     balanced_train_ds
     .shuffle(buffer_size=500)
     .batch(config.BATCH_SIZE, drop_remainder=False)
-    .map(lambda x, y: (augmentation_layers(x, training=True), y), num_parallel_calls=tf.data.AUTOTUNE)
     .prefetch(buffer_size=tf.data.AUTOTUNE)
 )
 
@@ -354,8 +334,22 @@ if os.path.isfile(str(config.MODEL_SAVE_FINAL)) and config.USE_PRETRAINED_MODEL:
 else:
     print("No using saved model")
     if config.USE_MODEL == "using custom":
+        augmentation_layers = tf.keras.Sequential([
+            tf.keras.layers.RandomRotation(factor=0.1, fill_mode="nearest"),
+            tf.keras.layers.RandomZoom(height_factor=0.15, width_factor=0.15, fill_mode="nearest"),
+            tf.keras.layers.RandomTranslation(height_factor=0.05, width_factor=0.05, fill_mode="nearest"),
+            tf.keras.layers.RandomBrightness(factor=0.15, value_range=(0, 1)),
+            tf.keras.layers.RandomContrast(factor=0.15),
+            tf.keras.layers.GaussianNoise(stddev=0.01),
+            tf.keras.layers.RandomZoom(height_factor=(-0.02, 0.02), width_factor=(-0.02, 0.02), fill_mode="nearest"),
+        ])
+
+        rescaling_layer = tf.keras.layers.Rescaling(1./255)
+
         model = tf.keras.models.Sequential([
                 tf.keras.Input(shape=config.TARGET_SIZE + config.SHAPE_ADD),
+                rescaling_layer,
+                augmentation_layers,
                 # Block 1
                 tf.keras.layers.Conv2D(32, (3, 3), activation="relu"),
                 tf.keras.layers.Conv2D(32, (3, 3), activation="relu"),
@@ -479,7 +473,7 @@ for img_path, true_label in test_images:
     try:
         img = tf.keras.preprocessing.image.load_img(img_path, target_size=config.TARGET_SIZE)
         img_array = tf.keras.preprocessing.image.img_to_array(img)
-        img_array = np.expand_dims(img_array, axis=0) / 255.0  # Normalize to [0, 1]
+        img_array = np.expand_dims(img_array, axis=0)
 
         classes = model.predict(img_array, batch_size=1, verbose=0)
         pred_idx = np.argmax(classes)

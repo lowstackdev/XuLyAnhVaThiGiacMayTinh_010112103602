@@ -180,27 +180,6 @@ for i in range(len(config.LABEL_STRINGS)): print(f"{config.LABEL_STRINGS[i]}: {l
 # %%
 
 # %%
-def resize_image(image_path, dim):
-    img = cv2.imread(image_path)
-    if img.shape[1] != img.shape[0]:
-        x = img.shape[1] // 2
-        y = img.shape[0] // 2
-        x -= y
-        img = img[0:0 + img.shape[0], x:x + img.shape[0]]
-    return cv2.resize(img, dim, interpolation = cv2.INTER_AREA)
-
-def CLAHE(image_path, dim, clipLimit, tileGridSize):
-    img = resize_image(image_path, dim)
-    clahe = cv2.createCLAHE(clipLimit=clipLimit, tileGridSize=tileGridSize)
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)  # convert from BGR to LAB color space
-    l, a, b = cv2.split(lab)  # split on 3 different channels
-    l2 = clahe.apply(l)  # apply CLAHE to the L-channel
-    lab = cv2.merge((l2,a,b))  # merge channels
-    img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)  # convert from LAB to BGR
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    return img
-
-# %%
 # Function for generate label to single image
 
 # Return index in key of all diagnosis list
@@ -211,80 +190,50 @@ def get_index_label(key, all_key):
 def get_multi_label_from_keys(idx_label):
     return [1 if i in idx_label else 0 for i in range(len(config.LABEL_STRINGS))]
 
-def process_fundus_image_with_clahe(img_path, keywords, all_key, target_size):
-    """Process a single fundus image with CLAHE enhancement and generate diagnostic labels"""
-    # check imgage valid
-    if (fundus_img := cv2.imread(img_path)) is None:
-        return None, None, None
+def get_fundus_multi_label(img_path, keywords, all_key):
+    if not os.path.exists(img_path):
+        return None
 
-    # Process keywords to generate multi-label diagnosis
+    # generate multi-label
     indices = [get_index_label(key, all_key) for key in keywords]
     indices = list(set(indices))
     label = get_multi_label_from_keys(indices)
 
-    # CLAHE enhancement
-    clahe_img = CLAHE(img_path, target_size, 20, (10,10))
+    return label
 
-    return label, os.path.basename(img_path), clahe_img
+def extract_fundus_dataset():
+    def process_fundus_entry(filename, keywords, all_key):
+        img_path = os.path.join(config.TRAINING_SOURCE_PATH, filename)
+        label = get_fundus_multi_label(img_path, keywords, all_key)
+        return img_path, label
 
-def process_patient_record(row_idx, df, left_eye_keywords, right_eye_keywords, all_key, target_size):
-    """Process a single patient record (both eyes) in parallel and generate diagnostic data"""
-    results = []
-    for fundus_col, keywords_col in [('Left-Fundus', left_eye_keywords), ('Right-Fundus', right_eye_keywords)]:
-        img_path = os.path.join(config.TRAINING_SOURCE_PATH, df[fundus_col][row_idx])
-        label, feature, clahe = process_fundus_image_with_clahe(img_path, keywords_col[row_idx], all_key, target_size)
-        if label is not None:
-            results.append((label, feature, clahe))
+    paths, labels = [], []
 
-    return results
+    for col, keywords in [('Left-Fundus', left_eye_keywords), ('Right-Fundus', right_eye_keywords)]:
+        for filename, keywords in zip(df[col], keywords):
+            path, label = process_fundus_entry(filename, keywords, all_key_single_label)
+            if label: paths.append(path); labels.append(label)
 
-# Optimized parallel processing
-synthetic_labels = []
-synthetic_features = []
-clahe_images = []
+    return np.array(paths), np.array(labels)
 
-# Parallel processing
-with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-    process_func = partial(
-        process_patient_record,
-        df=df,
-        left_eye_keywords=left_eye_keywords,
-        right_eye_keywords=right_eye_keywords,
-        all_key=all_key_single_label,
-        target_size=config.TARGET_SIZE
-    )
+synthetic_paths, synthetic_labels = extract_fundus_dataset()
 
-    futures = [executor.submit(process_func, i) for i in range(len(df))]
-
-    for future in concurrent.futures.as_completed(futures):
-        for label, feature, clahe_img in future.result():
-            if label is not None:
-                synthetic_labels.append(label)
-                synthetic_features.append(feature)
-                clahe_images.append(clahe_img)
-
-# %%
-clahe_images = np.stack(clahe_images, axis=0)
-synthetic_labels = np.asarray(synthetic_labels)
-
-# Grouping by patient ID to prevent data leakage (same patient's eyes in different sets)
-groups = [f.split('_')[0] for f in synthetic_features]
+# Grouping by patient ID to prevent data leakage
+groups = [os.path.basename(p).split('_')[0] for p in synthetic_paths]
 
 gss = GroupShuffleSplit(n_splits=1, test_size=config.VALIDATION_FRACTION, random_state=1)
-train_idx, val_idx = next(gss.split(clahe_images, synthetic_labels, groups=groups))
+train_idx, val_idx = next(gss.split(synthetic_paths, synthetic_labels, groups=groups))
 
-training_features = clahe_images[train_idx]
+training_paths = synthetic_paths[train_idx]
 training_labels = synthetic_labels[train_idx]
-training_filenames = [synthetic_features[i] for i in train_idx]
 
-validation_features = clahe_images[val_idx]
+validation_paths = synthetic_paths[val_idx]
 validation_labels = synthetic_labels[val_idx]
-validation_filenames = [synthetic_features[i] for i in val_idx]
 
-print("n training:", len(training_filenames))
-print("n validation:", len(validation_filenames))
+print("n training samples:", len(training_paths))
+print("n validation samples:", len(validation_paths))
 
-del clahe_images
+del synthetic_paths
 del synthetic_labels
 
 # %%
@@ -304,39 +253,30 @@ del synthetic_labels
 #     plt.tight_layout()
 #     plt.show()
 
-# display_image_samples(training_features, "Training Image Samples", COLOR_MODE, TARGET_SIZE)
-# display_image_samples(validation_features, "Validation Image Samples", COLOR_MODE, TARGET_SIZE)
+# display_image_samples(training_paths, "Training Image Samples", config.COLOR_MODE, config.TARGET_SIZE)
+# display_image_samples(validation_paths, "Validation Image Samples", config.COLOR_MODE, config.TARGET_SIZE)
 
 # %%
-BATCH_SIZE = 32
-raw_train_ds = tf.data.Dataset.from_tensor_slices((training_features, training_labels))
-raw_val_ds = tf.data.Dataset.from_tensor_slices((validation_features, validation_labels))
-
-augmentation_layers = tf.keras.Sequential([
-    # 1. GEOMETRIC TRANSFORMATIONS (limited)
-    tf.keras.layers.RandomRotation(factor=0.1, fill_mode="nearest"),  # ±36 degrees
-    tf.keras.layers.RandomZoom(height_factor=0.15, width_factor=0.15, fill_mode="nearest"),  # zoom
-    tf.keras.layers.RandomTranslation(height_factor=0.05, width_factor=0.05, fill_mode="nearest"),  # 5%
-    # 2. PHOTOMETRIC TRANSFORMATIONS (important)
-    tf.keras.layers.RandomBrightness(factor=0.15, value_range=(0, 1)),  # 15%
-    tf.keras.layers.RandomContrast(factor=0.15),  # 15% contrast variation
-    # 3. NOISE & ARTIFACTS (real-world simulation)
-    tf.keras.layers.GaussianNoise(stddev=0.01),  # noise
-    # 4. BLUR (simulating focus issues)
-    tf.keras.layers.RandomZoom(height_factor=(-0.02, 0.02), width_factor=(-0.02, 0.02), fill_mode="nearest"),  # blur effect
-])
-
-rescaling_layer = tf.keras.layers.Rescaling(1./255)
+raw_train_ds = tf.data.Dataset.from_tensor_slices((training_paths, training_labels))
+raw_val_ds = tf.data.Dataset.from_tensor_slices((validation_paths, validation_labels))
 
 def preprocess_raw_dataset(ds, name):
-    ds = ds.map(lambda x, y: (rescaling_layer(tf.cast(x, tf.float32)), y), num_parallel_calls=tf.data.AUTOTUNE)
+    def load_image(path, label):
+        image = tf.io.read_file(path)
+        return tf.image.decode_jpeg(image, channels=3), label
+
+    def resize_image(image, label):
+        return tf.image.resize(image, config.TARGET_SIZE), label
+
+    ds = ds.map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
+    ds = ds.map(resize_image, num_parallel_calls=tf.data.AUTOTUNE)
 
     cache_dir = config.CACHE_DIR / 'preprocess_raw_dataset'
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    for lockfile in cache_dir.glob(f"{name}*.lockfile"):
-        try: os.remove(lockfile)
-        except: pass
+    for lockfile in cache_dir.glob("*.lockfile"):
+        try: lockfile.unlink(missing_ok=True)
+        except Exception: pass
 
     cache_path = str(cache_dir / name)
     ds = ds.cache(cache_path)
@@ -358,7 +298,7 @@ def get_balanced_train_dataset(cached_ds, num_classes=8):
         stop_on_empty_dataset=False
     )
 
-    total_samples = len(training_features)
+    total_samples = len(training_paths)
     balanced_ds = balanced_ds.take(total_samples)
     return balanced_ds
 
@@ -371,14 +311,13 @@ balanced_train_ds = get_balanced_train_dataset(train_ds_cached)
 train_generator = (
     balanced_train_ds
     .shuffle(buffer_size=500)
-    .batch(BATCH_SIZE, drop_remainder=False)
-    .map(lambda x, y: (augmentation_layers(x, training=True), y), num_parallel_calls=tf.data.AUTOTUNE)
+    .batch(config.BATCH_SIZE, drop_remainder=False)
     .prefetch(buffer_size=tf.data.AUTOTUNE)
 )
 
 validation_generator = (
     val_ds_cached
-    .batch(BATCH_SIZE, drop_remainder=False)
+    .batch(config.BATCH_SIZE, drop_remainder=False)
     .prefetch(buffer_size=tf.data.AUTOTUNE)
 )
 
@@ -389,40 +328,55 @@ if os.path.isfile(str(config.MODEL_SAVE_FINAL)) and config.USE_PRETRAINED_MODEL:
 else:
     print("No using saved model")
     if config.USE_MODEL == "using custom":
+        augmentation_layers = tf.keras.Sequential([
+            tf.keras.layers.RandomRotation(factor=0.1, fill_mode="nearest"),
+            tf.keras.layers.RandomZoom(height_factor=0.15, width_factor=0.15, fill_mode="nearest"),
+            tf.keras.layers.RandomTranslation(height_factor=0.05, width_factor=0.05, fill_mode="nearest"),
+            tf.keras.layers.RandomBrightness(factor=0.15, value_range=(0, 1)),
+            tf.keras.layers.RandomContrast(factor=0.15),
+            tf.keras.layers.GaussianNoise(stddev=0.01),
+            tf.keras.layers.RandomZoom(height_factor=(-0.02, 0.02), width_factor=(-0.02, 0.02), fill_mode="nearest"),
+        ])
+
+        rescaling_layer = tf.keras.layers.Rescaling(1./255)
+
         inputs = tf.keras.Input(shape=config.TARGET_SIZE + config.SHAPE_ADD)
 
+        x = rescaling_layer(inputs)
+        x = augmentation_layers(x)
+
         # Conv larger kernel
-        x = tf.keras.layers.Conv2D(32, (7,7), padding='same', activation='relu')(inputs)
+        x = tf.keras.layers.Conv2D(32, (7,7), padding='same', activation='relu')(x)
         x = tf.keras.layers.BatchNormalization()(x)
         x = tf.keras.layers.MaxPooling2D(2,2)(x)
 
         # Block 1
-        shortcut_64 = tf.keras.layers.Conv2D(64, (1,1), padding='same')(x) if x.shape[-1] != 64 else x
+        shortcut = tf.keras.layers.Conv2D(64, (1,1), padding='same')(x)
         x = tf.keras.layers.Conv2D(64, (3,3), padding='same', activation='relu')(x)
         x = tf.keras.layers.BatchNormalization()(x)
         x = tf.keras.layers.Conv2D(64, (3,3), padding='same', activation='relu')(x)
         x = tf.keras.layers.BatchNormalization()(x)
-        x = tf.keras.layers.Add()([x, shortcut_64])
+        x = tf.keras.layers.Add()([x, shortcut])
         x = tf.keras.layers.Activation('relu')(x)
         x = tf.keras.layers.MaxPooling2D(2,2)(x)
 
         # Block 2
-        shortcut_128 = tf.keras.layers.Conv2D(128, (1,1), padding='same')(x) if x.shape[-1] != 128 else x
+        shortcut = tf.keras.layers.Conv2D(128, (1,1), padding='same')(x)
         x = tf.keras.layers.Conv2D(128, (3,3), padding='same', activation='relu')(x)
         x = tf.keras.layers.BatchNormalization()(x)
         x = tf.keras.layers.Conv2D(128, (3,3), padding='same', activation='relu')(x)
         x = tf.keras.layers.BatchNormalization()(x)
-        x = tf.keras.layers.Add()([x, shortcut_128])
+        x = tf.keras.layers.Add()([x, shortcut])
         x = tf.keras.layers.Activation('relu')(x)
         x = tf.keras.layers.MaxPooling2D(2,2)(x)
 
         # Block 3
-        shortcut_256 = tf.keras.layers.Conv2D(256, (1,1), padding='same')(x) if x.shape[-1] != 256 else x
+        shortcut = tf.keras.layers.Conv2D(256, (1,1), padding='same')(x)
         x = tf.keras.layers.Conv2D(256, (3,3), padding='same', activation='relu')(x)
         x = tf.keras.layers.BatchNormalization()(x)
         x = tf.keras.layers.Conv2D(256, (3,3), padding='same', activation='relu')(x)
         x = tf.keras.layers.BatchNormalization()(x)
-        x = tf.keras.layers.Add()([x, shortcut_256])
+        x = tf.keras.layers.Add()([x, shortcut])
         x = tf.keras.layers.Activation('relu')(x)
         x = tf.keras.layers.MaxPooling2D(2,2)(x)
 
@@ -507,10 +461,9 @@ count_no_disease = 0
 
 for i in range(len(test_list)):
     source = os.path.join(config.TESTING_SOURCE_PATH, test_list[i])
-    img = CLAHE(source, config.TARGET_SIZE, 20, (10,10))
+    img = tf.keras.preprocessing.image.load_img(source, target_size=config.TARGET_SIZE)
     img_array = tf.keras.preprocessing.image.img_to_array(img)
     img_array = np.expand_dims(img_array, axis=0)
-    img_array = img_array/255.0
     images = np.vstack([img_array])
     predict = model.predict(images)
     predict = predict.reshape(8)
