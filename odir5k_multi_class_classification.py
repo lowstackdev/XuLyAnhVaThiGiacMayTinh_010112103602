@@ -1,8 +1,11 @@
 # %%
 import os
+import glob
 from pathlib import Path
 import shutil
+import time
 from random import sample
+import uuid
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,6 +19,13 @@ print(tf.__version__)
 # %%
 PROJECT_ROOT = Path(__file__).parent.resolve()
 # PROJECT_ROOT = '/content/drive/MyDrive/Colab Notebooks'
+try:
+    import google.colab
+    CACHE_DIR = Path("/content/cache")
+except ImportError:
+    CACHE_DIR = PROJECT_ROOT / "cache"
+if CACHE_DIR.exists(): shutil.rmtree(CACHE_DIR)
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 DATASET_DIR = PROJECT_ROOT / "ODIR-5K"
 os.chdir(DATASET_DIR)
 
@@ -239,7 +249,7 @@ raw_val_ds = tf.keras.utils.image_dataset_from_directory(
     interpolation="lanczos3"
 )
 
-# 2. Define Preprocessing/Augmentation Pipeline
+# 2. Augmentation & Rescaling
 augmentation_layers = tf.keras.Sequential([
     # 1. GEOMETRIC TRANSFORMATIONS (limited)
     tf.keras.layers.RandomRotation(factor=0.1, fill_mode="nearest"),  # ±36 degrees
@@ -256,32 +266,64 @@ augmentation_layers = tf.keras.Sequential([
 
 rescaling_layer = tf.keras.layers.Rescaling(1.0 / 255)
 
-def prepare_dataset(ds, augment=False):
-    # Apply rescaling to all
+def preprocess_raw_dataset(ds, name):
     ds = ds.map(lambda x, y: (rescaling_layer(x), y), num_parallel_calls=tf.data.AUTOTUNE)
-    if augment:
-        # Apply augmentations only to training
-        ds = ds.map(lambda x, y: (augmentation_layers(x, training=True), y), num_parallel_calls=tf.data.AUTOTUNE)
 
-    # Enable caching and prefetching for high performance
-    return ds.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+    cache_dir = CACHE_DIR / 'preprocess_raw_dataset'
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
-train_generator = prepare_dataset(raw_train_ds, augment=True)
-validation_generator = prepare_dataset(raw_val_ds)
+    for lockfile in cache_dir.glob(f"{name}*.lockfile"):
+        try: os.remove(lockfile)
+        except: pass
 
-# Extract labels from training dataset for class weight calculation
-train_labels = np.concatenate([y for x, y in raw_train_ds], axis=0)
-train_labels = np.argmax(train_labels, axis=1)  # Convert one-hot to class indices
+    cache_path = str(cache_dir / name)
+    ds = ds.cache(cache_path)
 
-class_weight_vals = compute_class_weight("balanced", classes=np.unique(train_labels), y=train_labels)
-class_weights = dict(enumerate(class_weight_vals))
+    return ds
+
+def get_balanced_train_dataset(cached_ds, num_classes=8):
+    unbatched_ds = cached_ds.unbatch()
+    class_datasets = []
+    for i in range(num_classes):
+        class_ds = unbatched_ds.filter(lambda x, y: tf.argmax(y) == i).repeat()
+        class_datasets.append(class_ds)
+
+    balanced_ds = tf.data.Dataset.sample_from_datasets(
+        class_datasets,
+        weights=[1.0/num_classes] * num_classes,
+        stop_on_empty_dataset=False
+    )
+
+    total_samples = len(raw_train_ds.file_paths)
+    return balanced_ds.take(total_samples)
+
+train_ds_cached = preprocess_raw_dataset(raw_train_ds, name="training")
+val_ds_cached = preprocess_raw_dataset(raw_val_ds, name="validation")
+
+train_ds_cached.ignore_errors().prefetch(tf.data.AUTOTUNE).enumerate().reduce(np.int64(0), lambda x, _: x + 1)
+val_ds_cached.ignore_errors().prefetch(tf.data.AUTOTUNE).enumerate().reduce(np.int64(0), lambda x, _: x + 1)
+
+balanced_train_ds = get_balanced_train_dataset(train_ds_cached)
+train_generator = (
+    balanced_train_ds
+    .shuffle(buffer_size=500)
+    .batch(BATCH_SIZE, drop_remainder=False)
+    .map(lambda x, y: (augmentation_layers(x, training=True), y), num_parallel_calls=tf.data.AUTOTUNE)
+    .prefetch(buffer_size=tf.data.AUTOTUNE)
+)
+
+validation_generator = val_ds_cached.prefetch(buffer_size=tf.data.AUTOTUNE)
+
+y_train = np.concatenate([np.argmax(y.numpy(), axis=1) for x, y in raw_train_ds.map(lambda x, y: (x, y), num_parallel_calls=tf.data.AUTOTUNE)])
+class_weights = compute_class_weight('balanced', classes=np.arange(8), y=y_train)
+class_weight = dict(enumerate(class_weights))
 
 # %%
 USE_MODEL = "using custom"
 USE_PRETRAINED_MODEL = False
 
 INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
-N_EPOCH = 1
+N_EPOCH = 30
 LEARNING_RATE = 0.0001
 OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)  # tf.keras.optimizers.SGD(learning_rate=LEARNING_RATE)
 
@@ -347,12 +389,15 @@ model.compile(
 )
 
 # %%
+import gc
+gc.collect()
+
 history = model.fit(
     train_generator,
     validation_data=validation_generator,
     epochs=N_EPOCH,
     verbose=1,
-    class_weight=class_weights,
+    class_weight=class_weight,
     callbacks=callbacks
 )
 
@@ -382,12 +427,31 @@ model.evaluate(validation_generator)
 
 # %%
 test_images = []
-for label in LABEL_STRINGS:
-    label_dir = os.path.join(TESTING_SOURCE_PATH, label)
-    if os.path.exists(label_dir):
-        test_images.extend((os.path.join(label_dir, f), label) for f in os.listdir(label_dir) if f.lower().endswith((".png", ".jpg", ".jpeg")))
 
-print(f"\nPredicting {len(test_images)} files")
+filename_to_row_idx = {
+    fname: idx
+    for idx, row in df.iterrows()
+    for fname in [row['Left-Fundus'], row['Right-Fundus']]
+}
+
+for file_name in testing_source_files:
+    if not file_name.lower().endswith((".png", ".jpg", ".jpeg")):
+        continue
+
+    idx = filename_to_row_idx.get(file_name)
+    true_label = "Unknown"
+
+    if idx is not None:
+        row_data = df.iloc[idx]
+        for i, label_col in enumerate(LABEL_STRINGS):
+            if row_data[LABEL_COLS[i]] == 1:
+                true_label = label_col
+                break
+
+    test_images.append((os.path.join(TESTING_SOURCE_PATH, file_name), true_label))
+
+print(f"\nPredicting {len(test_images)} files from testing set")
+print("Class Mapping:", {i: name for i, name in enumerate(raw_train_ds.class_names)})
 
 # table header
 header = f"| {'File':<30} | {'True Label':<15} | {'Predicted':<15} | {'Pred ID':<8} | {'X ID':<5} | {'Probabilities':<50} |"
@@ -397,17 +461,20 @@ print(header)
 print(separator)
 
 for img_path, true_label in test_images:
-    img = tf.keras.preprocessing.image.load_img(img_path, target_size=TARGET_SIZE)
-    img_array = tf.keras.preprocessing.image.img_to_array(img)
-    img_array = np.expand_dims(img_array, axis=0)
+    try:
+        img = tf.keras.preprocessing.image.load_img(img_path, target_size=TARGET_SIZE)
+        img_array = tf.keras.preprocessing.image.img_to_array(img)
+        img_array = np.expand_dims(img_array, axis=0) / 255.0  # Normalize to [0, 1]
 
-    classes = model.predict(img_array, batch_size=8, verbose=0)
-    pred_idx = np.argmax(classes)
-    pred_label = raw_train_ds.class_names[pred_idx]
-    x_idx = np.argmax((classes > 0.05).astype("int32"))
+        classes = model.predict(img_array, batch_size=1, verbose=0)
+        pred_idx = np.argmax(classes)
+        pred_label = raw_train_ds.class_names[pred_idx]
+        x_idx = np.argmax((classes > 0.05).astype("int32"))
 
-    # table row
-    filename = os.path.basename(img_path)
-    probs_str = ", ".join([f"{prob:.4f}" for prob in classes[0]])
-    row = f"| {filename:<30} | {true_label:<15} | {pred_label:<15} | {pred_idx:<8} | {x_idx:<5} | {probs_str:<50} |"
-    print(row)
+        # table row
+        filename = os.path.basename(img_path)
+        probs_str = ", ".join([f"{prob:.4f}" for prob in classes[0]])
+        row = f"| {filename:<30} | {true_label:<15} | {pred_label:<15} | {pred_idx:<8} | {x_idx:<5} | {probs_str:<50} |"
+        print(row)
+    except Exception as e:
+        print(f"Error processing {img_path}: {e}")

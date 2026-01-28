@@ -276,7 +276,7 @@ display_image_samples(training_features, "Training Image Samples", COLOR_MODE, T
 display_image_samples(validation_features, "Validation Image Samples", COLOR_MODE, TARGET_SIZE)
 
 # %%
-# 1. Define Preprocessing/Augmentation Pipeline
+# 1. Augmentation Pipeline
 augmentation_layers = tf.keras.Sequential([
     tf.keras.layers.RandomRotation(factor=0.0833, fill_mode='nearest'),  # ±30 degrees
     tf.keras.layers.RandomZoom(height_factor=0.15, width_factor=0.15, fill_mode='nearest'),
@@ -287,7 +287,7 @@ augmentation_layers = tf.keras.Sequential([
 
 rescaling_layer = tf.keras.layers.Rescaling(1./255)
 
-# 2. Prepare Dataset for training and validation
+# 2. Dataset for training and validation
 def prepare_dataset(features, labels, batch_size=32, augment=False):
     ds = tf.data.Dataset.from_tensor_slices((features, labels))
 
@@ -315,7 +315,7 @@ USE_MODEL = "using custom"
 USE_PRETRAINED_MODEL = False
 
 INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
-N_EPOCH = 1
+N_EPOCH = 30
 LEARNING_RATE = 1e-4
 LOSS = "binary_crossentropy"
 OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)
@@ -404,6 +404,9 @@ model.compile(
 )
 
 # %%
+import gc
+gc.collect()
+
 history = model.fit(
     train_generator,
     validation_data=validation_generator,
