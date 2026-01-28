@@ -33,6 +33,8 @@ class Config:
     ANNOTATION_FILE_NAME = "ODIR-5K_Training_Annotations(Updated)_V2.xlsx"
     TRAINING_SOURCE_PATH = "ODIR-5K_Training_Images/"
     TESTING_SOURCE_PATH = "ODIR-5K_Testing_Images/"
+    LABEL_STRINGS = ['Normal', 'Diabetes', 'Glaucoma', 'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Abnormalities']
+    VALIDATION_FRACTION = 0.1
 
     # Image processing
     TARGET_SIZE = (230, 230)
@@ -42,7 +44,7 @@ class Config:
 
     # Model configuration
     BATCH_SIZE = 32
-    N_EPOCH = 30
+    EPOCHS = 30
     LEARNING_RATE = 0.0001
     OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)
 
@@ -105,10 +107,9 @@ def get_key_diagnosis_single(col_name):
 
     return list(unique_keywords)
 
-LABEL_STRINGS = ['Normal', 'Diabetes', 'Glaucoma', 'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Abnormalities']
-all_key_single_label = [get_key_diagnosis_single(test_df.columns[7 + i]) for i in range(len(LABEL_STRINGS))]
+all_key_single_label = [get_key_diagnosis_single(test_df.columns[7 + i]) for i in range(len(config.LABEL_STRINGS))]
 print("All keys:", sum(len(x) for x in all_key_single_label))
-for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
+for i in range(len(config.LABEL_STRINGS)): print(f"{config.LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
 
 # %%
 # all_key_sets = [set(keywords) for keywords in all_key_single_label]
@@ -124,7 +125,7 @@ for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_sin
 
 # all_key_single_label = [list(keywords) for keywords in all_key_sets]
 # print("Total intersected:", sum(len(x) for x in all_key_single_label))
-# for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
+# for i in range(len(config.LABEL_STRINGS)): print(f"{config.LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
 
 # %%
 # double_diagnosis_row = test_df[test_df[LABEL_COLS].sum(axis=1) > 1].index.tolist()
@@ -179,7 +180,7 @@ VALIDATION_PATH = "validation/"
 
 for path in [TRAINING_PATH, VALIDATION_PATH]:
     shutil.rmtree(path, ignore_errors=True)
-    for label in LABEL_STRINGS:
+    for label in config.LABEL_STRINGS:
         os.makedirs(os.path.join(path, label), exist_ok=True)
 
 # %%
@@ -188,8 +189,6 @@ testing_source_files = os.listdir(config.TESTING_SOURCE_PATH)
 
 print(f"Total training source images: {len(training_source_files)}")
 print(f"Total testing source images: {len(testing_source_files)}")
-
-VALIDATION_FRACTION = 0.1
 
 # Group files by patient ID to prevent data leakage (same patient's eyes in different sets)
 # File naming convention: [PatientID]_[eye].jpg
@@ -201,7 +200,7 @@ for f in training_source_files:
     patient_to_files[patient_id].append(f)
 
 unique_patient_ids = list(patient_to_files.keys())
-n_val_patients = int(len(unique_patient_ids) * VALIDATION_FRACTION)
+n_val_patients = int(len(unique_patient_ids) * config.VALIDATION_FRACTION)
 
 # Randomly select patients for each set
 all_patient_ids = sample(unique_patient_ids, len(unique_patient_ids))
@@ -216,7 +215,7 @@ print(f"Total validation files: {len(validation_files)}")
 # %%
 def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
     "Organize eye images into diagnosis-specific directories based on keywords"
-    label_mapping = list(zip(all_key_single_label, LABEL_STRINGS))
+    label_mapping = list(zip(all_key_single_label, config.LABEL_STRINGS))
 
     for file_name in file_list:
         # Find matching row in the dataframe
@@ -249,7 +248,7 @@ for files, src, dest, name in [
 ]:
     print(f"\nOrganizing {name} files...")
     organize_eye_images_by_diagnosis(files, src, dest)
-    for label in LABEL_STRINGS:
+    for label in config.LABEL_STRINGS:
         count = len(os.listdir(os.path.join(dest, label)))
         print(f"{name} {label} count: {count}")
 
@@ -411,7 +410,7 @@ callbacks = [
 history = model.fit(
     train_generator,
     validation_data=validation_generator,
-    epochs=config.N_EPOCH,
+    epochs=config.EPOCHS,
     verbose=1,
     class_weight=class_weight,
     callbacks=callbacks,
@@ -423,18 +422,18 @@ model.save(config.MODEL_SAVE_FINAL)
 
 # %%
 metrics = [
-    ("accuracy", "accuracy", 0),
-    ("loss", "loss", 1),
-    ("precision", "Precision", 2),
-    ("auc", "AUC value", 3),
-    ("recall", "Recall", 4),
+    ("accuracy", "accuracy"),
+    ("loss", "loss"),
+    ("precision", "Precision"),
+    ("auc", "AUC value"),
+    ("recall", "Recall"),
 ]
 epochs = range(1, len(history.history["accuracy"]) + 1)
-for key, label, loc in metrics:
+for key, label in metrics:
     plt.plot(epochs, history.history[key], "r", label=f"Training {label}")
     plt.plot(epochs, history.history[f"val_{key}"], "y", label=f"Validation {label}")
     plt.title(f"Training and validation {label}")
-    plt.legend(loc=loc)
+    plt.legend()
     plt.figure()
 plt.show()
 
@@ -459,7 +458,7 @@ for file_name in testing_source_files:
 
     if idx is not None:
         row_data = df.iloc[idx]
-        for i, label_col in enumerate(LABEL_STRINGS):
+        for i, label_col in enumerate(config.LABEL_STRINGS):
             if row_data[LABEL_COLS[i]] == 1:
                 true_label = label_col
                 break

@@ -3,7 +3,6 @@ from typing import Optional
 
 import tensorflow as tf
 
-
 class DataLoader(metaclass=ABCMeta):
     """Abstract Model class that is inherited to all models. """
 

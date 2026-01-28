@@ -37,6 +37,8 @@ class Config:
     ANNOTATION_FILE_NAME = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
     TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images/'
     TESTING_SOURCE_PATH = 'ODIR-5K_Testing_Images/'
+    LABEL_STRINGS = ['Normal', 'Diabetes', 'Glaucoma', 'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Abnormalities']
+    VALIDATION_FRACTION = 0.1
 
     # Image processing
     TARGET_SIZE = (230, 230)
@@ -46,7 +48,7 @@ class Config:
 
     # Model configuration
     BATCH_SIZE = 32
-    N_EPOCH = 30
+    EPOCHS = 30
     LEARNING_RATE = 1e-4
     LOSS = "binary_crossentropy"
     OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)
@@ -107,10 +109,9 @@ def get_key_diagnosis_single(col_name):
 
     return list(unique_keywords)
 
-LABEL_STRINGS = ['Normal', 'Diabetes', 'Glaucoma', 'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Abnormalities']
-all_key_single_label = [get_key_diagnosis_single(test_df.columns[7 + i]) for i in range(len(LABEL_STRINGS))]
+all_key_single_label = [get_key_diagnosis_single(test_df.columns[7 + i]) for i in range(len(config.LABEL_STRINGS))]
 print("All keys:", sum(len(x) for x in all_key_single_label))
-for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
+for i in range(len(config.LABEL_STRINGS)): print(f"{config.LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
 
 # %%
 # all_key_sets = [set(keywords) for keywords in all_key_single_label]
@@ -126,7 +127,7 @@ for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_sin
 
 # all_key_single_label = [list(keywords) for keywords in all_key_sets]
 # print("Intersected:", sum(len(x) for x in all_key_single_label))
-# for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
+# for i in range(len(config.LABEL_STRINGS)): print(f"{config.LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
 
 # %%
 # %%
@@ -208,7 +209,7 @@ def get_index_label(key, all_key):
 
 # Return multilabel by index
 def get_multi_label_from_keys(idx_label):
-    return [1 if i in idx_label else 0 for i in range(len(LABEL_STRINGS))]
+    return [1 if i in idx_label else 0 for i in range(len(config.LABEL_STRINGS))]
 
 def process_fundus_image_with_clahe(img_path, keywords, all_key, target_size):
     """Process a single fundus image with CLAHE enhancement and generate diagnostic labels"""
@@ -269,7 +270,7 @@ synthetic_labels = np.asarray(synthetic_labels)
 # Grouping by patient ID to prevent data leakage (same patient's eyes in different sets)
 groups = [f.split('_')[0] for f in synthetic_features]
 
-gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=1)
+gss = GroupShuffleSplit(n_splits=1, test_size=config.VALIDATION_FRACTION, random_state=1)
 train_idx, val_idx = next(gss.split(clahe_images, synthetic_labels, groups=groups))
 
 training_features = clahe_images[train_idx]
@@ -466,7 +467,7 @@ callbacks = [
 history = model.fit(
     train_generator,
     validation_data=validation_generator,
-    epochs=config.N_EPOCH,
+    epochs=config.EPOCHS,
     verbose=1,
     class_weight=class_weight,
     callbacks=callbacks,
@@ -478,18 +479,18 @@ model.save(config.MODEL_SAVE_FINAL)
 
 # %%
 metrics = [
-    ('binary_accuracy', 'accuracy', 0),
-    ('loss', 'loss', 1),
-    ('auc_value', 'AUC value', 3),
-    ('precision', 'Precision', 2),
-    ('recall', 'Recall', 4),
+    ('binary_accuracy', 'accuracy'),
+    ('loss', 'loss'),
+    ('auc_value', 'AUC value'),
+    ('precision', 'Precision'),
+    ('recall', 'Recall'),
 ]
 epochs = range(1, len(history.history['loss']) + 1)
-for key, label, loc in metrics:
+for key, label in metrics:
     plt.plot(epochs, history.history[key], 'r', label=f'Training {label}')
     plt.plot(epochs, history.history[f'val_{key}'], 'y', label=f'Validation {label}')
     plt.title(f'Training and validation {label}')
-    plt.legend(loc=loc)
+    plt.legend()
     plt.figure()
 plt.show()
 
@@ -523,7 +524,7 @@ for i in range(len(test_list)):
     else: count_single_disease += 1
 
     # Get labels description
-    active_labels = [s for s, p in zip(LABEL_STRINGS, predicted_labels) if p] or ["None"]
+    active_labels = [s for s, p in zip(config.LABEL_STRINGS, predicted_labels) if p] or ["None"]
 
     # Format and display results
     filename = os.path.basename(source)
