@@ -18,9 +18,9 @@ print(tf.__version__)
 
 # %%
 PROJECT_ROOT = Path(__file__).parent.resolve()
-# PROJECT_ROOT = '/content/drive/MyDrive/Colab Notebooks'
 try:
     import google.colab
+    PROJECT_ROOT = Path('/content/drive/MyDrive/Colab Notebooks')
     CACHE_DIR = Path("/content/cache")
 except ImportError:
     CACHE_DIR = PROJECT_ROOT / "cache"
@@ -381,7 +381,6 @@ else:
                 tf.keras.layers.Dense(8, activation="softmax")])
 
 model.summary(line_length=100)
-
 model.compile(
     loss=LOSS,
     optimizer=OPTIMIZER,

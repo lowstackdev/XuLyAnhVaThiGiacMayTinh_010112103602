@@ -1,12 +1,20 @@
 # %%
 import os
+import glob
 from pathlib import Path
+import shutil
+import time
+from random import sample
+import uuid
+import concurrent.futures
+from functools import partial
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn.utils import compute_class_weight
+from sklearn.model_selection import train_test_split, GroupShuffleSplit
 import cv2
 import tensorflow as tf
 
@@ -14,7 +22,14 @@ print(tf.__version__)
 
 # %%
 PROJECT_ROOT = Path(__file__).parent.resolve()
-# PROJECT_ROOT = '/content/drive/MyDrive/Colab Notebooks'
+try:
+    import google.colab
+    PROJECT_ROOT = Path('/content/drive/MyDrive/Colab Notebooks')
+    CACHE_DIR = Path("/content/cache")
+except ImportError:
+    CACHE_DIR = PROJECT_ROOT / "cache"
+if CACHE_DIR.exists(): shutil.rmtree(CACHE_DIR)
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 DATASET_DIR = PROJECT_ROOT / "ODIR-5K"
 os.chdir(DATASET_DIR)
 
@@ -168,9 +183,6 @@ def get_index_label(key, all_key):
 def get_multi_label_from_keys(idx_label):
     return [1 if i in idx_label else 0 for i in range(len(LABEL_STRINGS))]
 
-import concurrent.futures
-from functools import partial
-
 def process_fundus_image_with_clahe(img_path, keywords, all_key, target_size):
     """Process a single fundus image with CLAHE enhancement and generate diagnostic labels"""
     # check imgage valid
@@ -187,11 +199,10 @@ def process_fundus_image_with_clahe(img_path, keywords, all_key, target_size):
 
     return label, os.path.basename(img_path), clahe_img
 
-def process_patient_record_parallel(row_idx, df, left_eye_keywords, right_eye_keywords, all_key, target_size):
+def process_patient_record(row_idx, df, left_eye_keywords, right_eye_keywords, all_key, target_size):
     """Process a single patient record (both eyes) in parallel and generate diagnostic data"""
     results = []
-    # Process both eyes using a loop
-    for eye_side, fundus_col, keywords_col in [('Left', 'Left-Fundus', left_eye_keywords), ('Right', 'Right-Fundus', right_eye_keywords)]:
+    for fundus_col, keywords_col in [('Left-Fundus', left_eye_keywords), ('Right-Fundus', right_eye_keywords)]:
         img_path = os.path.join(TRAINING_SOURCE_PATH, df[fundus_col][row_idx])
         label, feature, clahe = process_fundus_image_with_clahe(img_path, keywords_col[row_idx], all_key, target_size)
         if label is not None:
@@ -207,7 +218,7 @@ clahe_images = []
 # Parallel processing
 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
     process_func = partial(
-        process_patient_record_parallel,
+        process_patient_record,
         df=df,
         left_eye_keywords=left_eye_keywords,
         right_eye_keywords=right_eye_keywords,
@@ -223,10 +234,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
                 synthetic_labels.append(label)
                 synthetic_features.append(feature)
                 clahe_images.append(clahe_img)
-
 # %%
-from sklearn.model_selection import train_test_split, GroupShuffleSplit
-
 clahe_images = np.stack(clahe_images, axis=0)
 synthetic_labels = np.asarray(synthetic_labels)
 
@@ -249,31 +257,31 @@ print("n validation:", len(validation_filenames))
 
 # Approximate class weights by looking at the presence of each class (multi-label)
 train_labels_idx = np.argmax(training_labels, axis=1)
-class_weights_vals = compute_class_weight(class_weight='balanced', classes=np.arange(8), y=train_labels_idx)
-class_weights = dict(enumerate(class_weights_vals))
+class_weights = compute_class_weight(class_weight='balanced', classes=np.arange(8), y=train_labels_idx)
+class_weight = dict(enumerate(class_weights))
 
 del clahe_images
 del synthetic_labels
 
 # %%
-def display_image_samples(features, title, color_mode, target_size):
-    """Display a 2x5 grid of image samples with proper coloring based on color mode"""
-    f, ax = plt.subplots(2, 5)
-    f.set_size_inches(10, 10)
-    f.suptitle(title, fontsize=16)
+# def display_image_samples(features, title, color_mode, target_size):
+#     """Display a 2x5 grid of image samples with proper coloring based on color mode"""
+#     f, ax = plt.subplots(2, 5)
+#     f.set_size_inches(10, 10)
+#     f.suptitle(title, fontsize=16)
 
-    for idx in range(10):
-        i, j = divmod(idx, 5)
-        if color_mode == 'rgb':
-            ax[i,j].imshow(features[idx].reshape(target_size[0], target_size[1], 3), cmap="hsv")
-        else:
-            ax[i,j].imshow(features[idx].reshape(target_size[0], target_size[1]), cmap="gray")
+#     for idx in range(10):
+#         i, j = divmod(idx, 5)
+#         if color_mode == 'rgb':
+#             ax[i,j].imshow(features[idx].reshape(target_size[0], target_size[1], 3), cmap="hsv")
+#         else:
+#             ax[i,j].imshow(features[idx].reshape(target_size[0], target_size[1]), cmap="gray")
 
-    plt.tight_layout()
-    plt.show()
+#     plt.tight_layout()
+#     plt.show()
 
-display_image_samples(training_features, "Training Image Samples", COLOR_MODE, TARGET_SIZE)
-display_image_samples(validation_features, "Validation Image Samples", COLOR_MODE, TARGET_SIZE)
+# display_image_samples(training_features, "Training Image Samples", COLOR_MODE, TARGET_SIZE)
+# display_image_samples(validation_features, "Validation Image Samples", COLOR_MODE, TARGET_SIZE)
 
 # %%
 # 1. Augmentation Pipeline
@@ -412,7 +420,7 @@ history = model.fit(
     validation_data=validation_generator,
     epochs=N_EPOCH,
     verbose=1,
-    class_weight=class_weights,
+    class_weight=class_weight,
     callbacks=callbacks
 )
 
