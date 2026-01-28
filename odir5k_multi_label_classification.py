@@ -234,6 +234,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
                 synthetic_labels.append(label)
                 synthetic_features.append(feature)
                 clahe_images.append(clahe_img)
+
 # %%
 clahe_images = np.stack(clahe_images, axis=0)
 synthetic_labels = np.asarray(synthetic_labels)
@@ -254,11 +255,6 @@ validation_filenames = [synthetic_features[i] for i in val_idx]
 
 print("n training:", len(training_filenames))
 print("n validation:", len(validation_filenames))
-
-# Approximate class weights by looking at the presence of each class (multi-label)
-train_labels_idx = np.argmax(training_labels, axis=1)
-class_weights = compute_class_weight(class_weight='balanced', classes=np.arange(8), y=train_labels_idx)
-class_weight = dict(enumerate(class_weights))
 
 del clahe_images
 del synthetic_labels
@@ -284,39 +280,83 @@ del synthetic_labels
 # display_image_samples(validation_features, "Validation Image Samples", COLOR_MODE, TARGET_SIZE)
 
 # %%
-# 1. Augmentation Pipeline
+BATCH_SIZE = 32
+raw_train_ds = tf.data.Dataset.from_tensor_slices((training_features, training_labels))
+raw_val_ds = tf.data.Dataset.from_tensor_slices((validation_features, validation_labels))
+
 augmentation_layers = tf.keras.Sequential([
-    tf.keras.layers.RandomRotation(factor=0.0833, fill_mode='nearest'),  # ±30 degrees
-    tf.keras.layers.RandomZoom(height_factor=0.15, width_factor=0.15, fill_mode='nearest'),
-    tf.keras.layers.RandomBrightness(factor=0.1),  # Adjust brightness
-    tf.keras.layers.RandomContrast(factor=0.1),    # Adjust contrast
-    tf.keras.layers.GaussianNoise(0.01),
+    # 1. GEOMETRIC TRANSFORMATIONS (limited)
+    tf.keras.layers.RandomRotation(factor=0.1, fill_mode="nearest"),  # ±36 degrees
+    tf.keras.layers.RandomZoom(height_factor=0.15, width_factor=0.15, fill_mode="nearest"),  # zoom
+    tf.keras.layers.RandomTranslation(height_factor=0.05, width_factor=0.05, fill_mode="nearest"),  # 5%
+    # 2. PHOTOMETRIC TRANSFORMATIONS (important)
+    tf.keras.layers.RandomBrightness(factor=0.15, value_range=(0, 1)),  # 15%
+    tf.keras.layers.RandomContrast(factor=0.15),  # 15% contrast variation
+    # 3. NOISE & ARTIFACTS (real-world simulation)
+    tf.keras.layers.GaussianNoise(stddev=0.01),  # noise
+    # 4. BLUR (simulating focus issues)
+    tf.keras.layers.RandomZoom(height_factor=(-0.02, 0.02), width_factor=(-0.02, 0.02), fill_mode="nearest"),  # blur effect
 ])
 
 rescaling_layer = tf.keras.layers.Rescaling(1./255)
 
-# 2. Dataset for training and validation
-def prepare_dataset(features, labels, batch_size=32, augment=False):
-    ds = tf.data.Dataset.from_tensor_slices((features, labels))
+def preprocess_raw_dataset(ds, name):
+    ds = ds.map(lambda x, y: (rescaling_layer(tf.cast(x, tf.float32)), y), num_parallel_calls=tf.data.AUTOTUNE)
 
-    # Apply rescaling (features are 0-255 numpy arrays from CLAHE processing)
-    ds = ds.map(lambda x, y: (rescaling_layer(tf.cast(x, tf.float32)), y),
-                num_parallel_calls=tf.data.AUTOTUNE)
+    cache_dir = CACHE_DIR / 'preprocess_raw_dataset'
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
-    ds = ds.cache()
+    for lockfile in cache_dir.glob(f"{name}*.lockfile"):
+        try: os.remove(lockfile)
+        except: pass
 
-    if augment:
-        # Shuffle and apply augmentations only to training
-        ds = ds.shuffle(buffer_size=min(len(features), 1000))
-        # ds = ds.repeat() # Removed to allow automatic step calculation
-        ds = ds.map(lambda x, y: (augmentation_layers(x, training=True), y),
-                    num_parallel_calls=tf.data.AUTOTUNE)
+    cache_path = str(cache_dir / name)
+    ds = ds.cache(cache_path)
 
-    return ds.batch(batch_size).prefetch(buffer_size=tf.data.AUTOTUNE)
+    ds.ignore_errors().prefetch(tf.data.AUTOTUNE).enumerate().reduce(np.int64(0), lambda x, _: x + 1)
 
-BATCH_SIZE = 32
-train_generator = prepare_dataset(training_features, training_labels, batch_size=BATCH_SIZE, augment=True)
-validation_generator = prepare_dataset(validation_features, validation_labels, batch_size=BATCH_SIZE)
+    return ds
+
+def get_balanced_train_dataset(cached_ds, num_classes=8):
+    class_datasets = []
+
+    for i in range(num_classes):
+        class_ds = cached_ds.filter(lambda x, y: y[i] == 1).repeat()
+        class_datasets.append(class_ds)
+
+    balanced_ds = tf.data.Dataset.sample_from_datasets(
+        class_datasets,
+        weights=[1.0/num_classes] * num_classes,
+        stop_on_empty_dataset=False
+    )
+
+    total_samples = len(training_features)
+    balanced_ds = balanced_ds.take(total_samples)
+    return balanced_ds
+
+# cached datasets
+train_ds_cached = preprocess_raw_dataset(raw_train_ds, name="training")
+val_ds_cached = preprocess_raw_dataset(raw_val_ds, name="validation")
+
+# oversampling training data
+balanced_train_ds = get_balanced_train_dataset(train_ds_cached)
+train_generator = (
+    balanced_train_ds
+    .shuffle(buffer_size=500)
+    .batch(BATCH_SIZE, drop_remainder=False)
+    .map(lambda x, y: (augmentation_layers(x, training=True), y), num_parallel_calls=tf.data.AUTOTUNE)
+    .prefetch(buffer_size=tf.data.AUTOTUNE)
+)
+
+validation_generator = (
+    val_ds_cached
+    .batch(BATCH_SIZE, drop_remainder=False)
+    .prefetch(buffer_size=tf.data.AUTOTUNE)
+)
+
+# Approximate class weights by looking at the presence of each class (multi-label)
+class_weights = compute_class_weight(class_weight='balanced', classes=np.arange(8), y=np.argmax(training_labels, axis=1))
+class_weight = dict(enumerate(class_weights))
 
 # %%
 USE_MODEL = "using custom"

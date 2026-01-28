@@ -225,7 +225,6 @@ SHAPE_ADD = COLOR_SHAPE_MAP.get(COLOR_MODE, (3,))
 
 # %%
 BATCH_SIZE = 32
-# 1. Load Raw Datasets
 raw_train_ds = tf.keras.utils.image_dataset_from_directory(
     TRAINING_PATH,
     labels="inferred",
@@ -249,7 +248,6 @@ raw_val_ds = tf.keras.utils.image_dataset_from_directory(
     interpolation="lanczos3"
 )
 
-# 2. Augmentation & Rescaling
 augmentation_layers = tf.keras.Sequential([
     # 1. GEOMETRIC TRANSFORMATIONS (limited)
     tf.keras.layers.RandomRotation(factor=0.1, fill_mode="nearest"),  # ±36 degrees
@@ -279,11 +277,14 @@ def preprocess_raw_dataset(ds, name):
     cache_path = str(cache_dir / name)
     ds = ds.cache(cache_path)
 
+    ds.ignore_errors().prefetch(tf.data.AUTOTUNE).enumerate().reduce(np.int64(0), lambda x, _: x + 1)
+
     return ds
 
 def get_balanced_train_dataset(cached_ds, num_classes=8):
     unbatched_ds = cached_ds.unbatch()
     class_datasets = []
+
     for i in range(num_classes):
         class_ds = unbatched_ds.filter(lambda x, y: tf.argmax(y) == i).repeat()
         class_datasets.append(class_ds)
@@ -295,14 +296,14 @@ def get_balanced_train_dataset(cached_ds, num_classes=8):
     )
 
     total_samples = len(raw_train_ds.file_paths)
-    return balanced_ds.take(total_samples)
+    balanced_ds = balanced_ds.take(total_samples)
+    return balanced_ds
 
+# cached datasets
 train_ds_cached = preprocess_raw_dataset(raw_train_ds, name="training")
 val_ds_cached = preprocess_raw_dataset(raw_val_ds, name="validation")
 
-train_ds_cached.ignore_errors().prefetch(tf.data.AUTOTUNE).enumerate().reduce(np.int64(0), lambda x, _: x + 1)
-val_ds_cached.ignore_errors().prefetch(tf.data.AUTOTUNE).enumerate().reduce(np.int64(0), lambda x, _: x + 1)
-
+# oversampling training data
 balanced_train_ds = get_balanced_train_dataset(train_ds_cached)
 train_generator = (
     balanced_train_ds
@@ -312,8 +313,13 @@ train_generator = (
     .prefetch(buffer_size=tf.data.AUTOTUNE)
 )
 
-validation_generator = val_ds_cached.prefetch(buffer_size=tf.data.AUTOTUNE)
+validation_generator = (
+    val_ds_cached
+    .batch(BATCH_SIZE, drop_remainder=False)
+    .prefetch(buffer_size=tf.data.AUTOTUNE)
+)
 
+# Calculate class weights from raw training data to handle class imbalance
 y_train = np.concatenate([np.argmax(y.numpy(), axis=1) for x, y in raw_train_ds.map(lambda x, y: (x, y), num_parallel_calls=tf.data.AUTOTUNE)])
 class_weights = compute_class_weight('balanced', classes=np.arange(8), y=y_train)
 class_weight = dict(enumerate(class_weights))
