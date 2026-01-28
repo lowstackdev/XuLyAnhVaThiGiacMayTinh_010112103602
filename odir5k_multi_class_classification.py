@@ -17,21 +17,60 @@ import tensorflow as tf
 print(tf.__version__)
 
 # %%
-PROJECT_ROOT = Path(__file__).parent.resolve()
-try:
-    import google.colab
-    PROJECT_ROOT = Path('/content/drive/MyDrive/Colab Notebooks')
-    CACHE_DIR = Path("/content/cache")
-except ImportError:
-    CACHE_DIR = PROJECT_ROOT / "cache"
-if CACHE_DIR.exists(): shutil.rmtree(CACHE_DIR)
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
-DATASET_DIR = PROJECT_ROOT / "ODIR-5K"
-os.chdir(DATASET_DIR)
+class Config:
+    # Project paths
+    PROJECT_ROOT = Path(__file__).parent.resolve()
+    try:
+        import google.colab
+        PROJECT_ROOT = Path('/content/drive/MyDrive/Colab Notebooks')
+        CACHE_DIR = Path("/content/cache")
+    except ImportError:
+        CACHE_DIR = PROJECT_ROOT / "cache" / "odir5k_multi_class_classification"
+
+    DATASET_DIR = PROJECT_ROOT / "ODIR-5K"
+
+    # Dataset configuration
+    ANNOTATION_FILE_NAME = "ODIR-5K_Training_Annotations(Updated)_V2.xlsx"
+    TRAINING_SOURCE_PATH = "ODIR-5K_Training_Images/"
+    TESTING_SOURCE_PATH = "ODIR-5K_Testing_Images/"
+
+    # Image processing
+    TARGET_SIZE = (230, 230)
+    COLOR_MODE = "rgb"
+    COLOR_SHAPE_MAP = {"grayscale": (1,), "rgb": (3,), "rgba": (4,)}
+    SHAPE_ADD = COLOR_SHAPE_MAP.get(COLOR_MODE, (3,))
+
+    # Model configuration
+    BATCH_SIZE = 32
+    N_EPOCH = 30
+    LEARNING_RATE = 0.0001
+    OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)
+
+    # Metrics
+    ACCURACY = "accuracy"
+    PRECISION = tf.keras.metrics.Precision(name="precision")
+    RECALL = tf.keras.metrics.Recall(name="recall")
+    AUC_VALUE = tf.keras.metrics.AUC(num_thresholds=200, curve="ROC", summation_method="interpolation", multi_label=True)
+    LOSS = tf.keras.losses.CategoricalFocalCrossentropy(gamma=2.0, alpha=0.25, label_smoothing=0.1)
+    F1_SCORE = tf.keras.metrics.F1Score(average='macro', name='f1_score')
+
+    # Model paths
+    MODEL_DIR = PROJECT_ROOT / "Trained_Models" / "ODIR5K-Multi-Class"
+    MODEL_SAVE_WEIGHTS = str(MODEL_DIR / "ODIR5K_weights.weights.h5")
+    MODEL_SAVE_FINAL = str(MODEL_DIR / "ODIR5K_final.keras")
+    CHECKPOINT_PATH = str(MODEL_DIR / "ODIR5K.keras")
+
+    # Model selection
+    USE_MODEL = "using custom"
+    USE_PRETRAINED_MODEL = False
+
+config = Config()
 
 # %%
-FILE_NAME = "ODIR-5K_Training_Annotations(Updated)_V2.xlsx"
-df = pd.read_excel(FILE_NAME)
+os.chdir(config.DATASET_DIR)
+
+# %%
+df = pd.read_excel(config.ANNOTATION_FILE_NAME)
 print(df.head())
 
 # %%
@@ -135,9 +174,6 @@ for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_sin
 #         break
 
 # %%
-TRAINING_SOURCE_PATH = "ODIR-5K_Training_Images/"
-TESTING_SOURCE_PATH = "ODIR-5K_Testing_Images/"
-
 TRAINING_PATH = "training/"
 VALIDATION_PATH = "validation/"
 
@@ -147,8 +183,8 @@ for path in [TRAINING_PATH, VALIDATION_PATH]:
         os.makedirs(os.path.join(path, label), exist_ok=True)
 
 # %%
-training_source_files = os.listdir(TRAINING_SOURCE_PATH)
-testing_source_files = os.listdir(TESTING_SOURCE_PATH)
+training_source_files = os.listdir(config.TRAINING_SOURCE_PATH)
+testing_source_files = os.listdir(config.TESTING_SOURCE_PATH)
 
 print(f"Total training source images: {len(training_source_files)}")
 print(f"Total testing source images: {len(testing_source_files)}")
@@ -208,8 +244,8 @@ def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
                     break
 
 for files, src, dest, name in [
-    (training_files, TRAINING_SOURCE_PATH, TRAINING_PATH, "Training"),
-    (validation_files, TRAINING_SOURCE_PATH, VALIDATION_PATH, "Validation"),
+    (training_files, config.TRAINING_SOURCE_PATH, TRAINING_PATH, "Training"),
+    (validation_files, config.TRAINING_SOURCE_PATH, VALIDATION_PATH, "Validation"),
 ]:
     print(f"\nOrganizing {name} files...")
     organize_eye_images_by_diagnosis(files, src, dest)
@@ -218,20 +254,13 @@ for files, src, dest, name in [
         print(f"{name} {label} count: {count}")
 
 # %%
-TARGET_SIZE = (200, 300)  # (int(height/16), int(width/16))
-COLOR_MODE = "rgb"
-COLOR_SHAPE_MAP = {"grayscale": (1,), "rgb": (3,), "rgba": (4,)}
-SHAPE_ADD = COLOR_SHAPE_MAP.get(COLOR_MODE, (3,))
-
-# %%
-BATCH_SIZE = 32
 raw_train_ds = tf.keras.utils.image_dataset_from_directory(
     TRAINING_PATH,
     labels="inferred",
     label_mode="categorical",
-    color_mode=COLOR_MODE,
-    batch_size=BATCH_SIZE,
-    image_size=TARGET_SIZE,
+    color_mode=config.COLOR_MODE,
+    batch_size=config.BATCH_SIZE,
+    image_size=config.TARGET_SIZE,
     shuffle=True,
     seed=42,
     interpolation="lanczos3"
@@ -241,9 +270,9 @@ raw_val_ds = tf.keras.utils.image_dataset_from_directory(
     VALIDATION_PATH,
     labels="inferred",
     label_mode="categorical",
-    color_mode=COLOR_MODE,
-    batch_size=BATCH_SIZE,
-    image_size=TARGET_SIZE,
+    color_mode=config.COLOR_MODE,
+    batch_size=config.BATCH_SIZE,
+    image_size=config.TARGET_SIZE,
     shuffle=False,
     interpolation="lanczos3"
 )
@@ -267,7 +296,7 @@ rescaling_layer = tf.keras.layers.Rescaling(1.0 / 255)
 def preprocess_raw_dataset(ds, name):
     ds = ds.map(lambda x, y: (rescaling_layer(x), y), num_parallel_calls=tf.data.AUTOTUNE)
 
-    cache_dir = CACHE_DIR / 'preprocess_raw_dataset'
+    cache_dir = config.CACHE_DIR / 'preprocess_raw_dataset'
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     for lockfile in cache_dir.glob(f"{name}*.lockfile"):
@@ -308,57 +337,26 @@ balanced_train_ds = get_balanced_train_dataset(train_ds_cached)
 train_generator = (
     balanced_train_ds
     .shuffle(buffer_size=500)
-    .batch(BATCH_SIZE, drop_remainder=False)
+    .batch(config.BATCH_SIZE, drop_remainder=False)
     .map(lambda x, y: (augmentation_layers(x, training=True), y), num_parallel_calls=tf.data.AUTOTUNE)
     .prefetch(buffer_size=tf.data.AUTOTUNE)
 )
 
 validation_generator = (
     val_ds_cached
-    .batch(BATCH_SIZE, drop_remainder=False)
+    .batch(config.BATCH_SIZE, drop_remainder=False)
     .prefetch(buffer_size=tf.data.AUTOTUNE)
 )
 
-# Calculate class weights from raw training data to handle class imbalance
-y_train = np.concatenate([np.argmax(y.numpy(), axis=1) for x, y in raw_train_ds.map(lambda x, y: (x, y), num_parallel_calls=tf.data.AUTOTUNE)])
-class_weights = compute_class_weight('balanced', classes=np.arange(8), y=y_train)
-class_weight = dict(enumerate(class_weights))
-
 # %%
-USE_MODEL = "using custom"
-USE_PRETRAINED_MODEL = False
-
-INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
-N_EPOCH = 30
-LEARNING_RATE = 0.0001
-OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)  # tf.keras.optimizers.SGD(learning_rate=LEARNING_RATE)
-
-ACCURACY = "accuracy"
-PRECISION = tf.keras.metrics.Precision(name="precision")
-RECALL = tf.keras.metrics.Recall(name="recall")
-AUC_VALUE = tf.keras.metrics.AUC(num_thresholds=200, curve="ROC", summation_method="interpolation", multi_label=True)
-LOSS = tf.keras.losses.CategoricalFocalCrossentropy(gamma=2.0, alpha=0.25, label_smoothing=0.1)
-F1_SCORE = tf.keras.metrics.F1Score(average='macro', name='f1_score')
-
-MODEL_DIR = PROJECT_ROOT / "Trained_Models" / "ODIR5K-Multi-Class"
-MODEL_DIR.mkdir(parents=True, exist_ok=True)
-MODEL_SAVE_WEIGHTS = str(MODEL_DIR / "ODIR5K_weights.weights.h5")
-MODEL_SAVE_FINAL = str(MODEL_DIR / "ODIR5K_final.keras")
-CHECKPOINT_PATH = str(MODEL_DIR / "ODIR5K.keras")
-
-callbacks = [tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True),
-             tf.keras.callbacks.ModelCheckpoint(CHECKPOINT_PATH, monitor="val_auc", save_best_only=True, mode="max", verbose=1),
-             tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=5, verbose=1)]
-
-# %%
-if os.path.isfile(str(MODEL_SAVE_FINAL)) and USE_PRETRAINED_MODEL:
+if os.path.isfile(str(config.MODEL_SAVE_FINAL)) and config.USE_PRETRAINED_MODEL:
     print("Using saved model")
-    model = tf.keras.models.load_model(str(MODEL_SAVE_FINAL))
+    model = tf.keras.models.load_model(str(config.MODEL_SAVE_FINAL))
 else:
     print("No using saved model")
-    if USE_MODEL == "using custom":
+    if config.USE_MODEL == "using custom":
         model = tf.keras.models.Sequential([
-                tf.keras.Input(shape=INPUT_SHAPE),
+                tf.keras.Input(shape=config.TARGET_SIZE + config.SHAPE_ADD),
                 # Block 1
                 tf.keras.layers.Conv2D(32, (3, 3), activation="relu"),
                 tf.keras.layers.Conv2D(32, (3, 3), activation="relu"),
@@ -388,27 +386,40 @@ else:
 
 model.summary(line_length=100)
 model.compile(
-    loss=LOSS,
-    optimizer=OPTIMIZER,
-    metrics=[ACCURACY, PRECISION, RECALL, AUC_VALUE, F1_SCORE]
+    loss=config.LOSS,
+    optimizer=config.OPTIMIZER,
+    metrics=[config.ACCURACY, config.PRECISION, config.RECALL, config.AUC_VALUE, config.F1_SCORE]
 )
 
 # %%
 import gc
 gc.collect()
 
+config.MODEL_DIR.mkdir(parents=True, exist_ok=True)
+
+# Calculate class weights from raw training data to handle class imbalance
+y_train = np.concatenate([np.argmax(y.numpy(), axis=1) for x, y in raw_train_ds.map(lambda x, y: (x, y), num_parallel_calls=tf.data.AUTOTUNE)])
+class_weights = compute_class_weight('balanced', classes=np.arange(8), y=y_train)
+class_weight = dict(enumerate(class_weights))
+
+callbacks = [
+    tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True),
+    tf.keras.callbacks.ModelCheckpoint(config.CHECKPOINT_PATH, monitor="val_auc", save_best_only=True, mode="max", verbose=1),
+    tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=5, verbose=1)
+]
+
 history = model.fit(
     train_generator,
     validation_data=validation_generator,
-    epochs=N_EPOCH,
+    epochs=config.N_EPOCH,
     verbose=1,
     class_weight=class_weight,
-    callbacks=callbacks
+    callbacks=callbacks,
 )
 
 # %%
-model.save_weights(MODEL_SAVE_WEIGHTS)
-model.save(MODEL_SAVE_FINAL)
+model.save_weights(config.MODEL_SAVE_WEIGHTS)
+model.save(config.MODEL_SAVE_FINAL)
 
 # %%
 metrics = [
@@ -416,7 +427,7 @@ metrics = [
     ("loss", "loss", 1),
     ("precision", "Precision", 2),
     ("auc", "AUC value", 3),
-    ("recall", "Recall", 4)
+    ("recall", "Recall", 4),
 ]
 epochs = range(1, len(history.history["accuracy"]) + 1)
 for key, label, loc in metrics:
@@ -453,7 +464,7 @@ for file_name in testing_source_files:
                 true_label = label_col
                 break
 
-    test_images.append((os.path.join(TESTING_SOURCE_PATH, file_name), true_label))
+    test_images.append((os.path.join(config.TESTING_SOURCE_PATH, file_name), true_label))
 
 print(f"\nPredicting {len(test_images)} files from testing set")
 print("Class Mapping:", {i: name for i, name in enumerate(raw_train_ds.class_names)})
@@ -467,7 +478,7 @@ print(separator)
 
 for img_path, true_label in test_images:
     try:
-        img = tf.keras.preprocessing.image.load_img(img_path, target_size=TARGET_SIZE)
+        img = tf.keras.preprocessing.image.load_img(img_path, target_size=config.TARGET_SIZE)
         img_array = tf.keras.preprocessing.image.img_to_array(img)
         img_array = np.expand_dims(img_array, axis=0) / 255.0  # Normalize to [0, 1]
 

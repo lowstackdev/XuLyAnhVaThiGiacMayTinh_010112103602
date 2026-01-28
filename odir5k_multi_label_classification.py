@@ -21,21 +21,59 @@ import tensorflow as tf
 print(tf.__version__)
 
 # %%
-PROJECT_ROOT = Path(__file__).parent.resolve()
-try:
-    import google.colab
-    PROJECT_ROOT = Path('/content/drive/MyDrive/Colab Notebooks')
-    CACHE_DIR = Path("/content/cache")
-except ImportError:
-    CACHE_DIR = PROJECT_ROOT / "cache"
-if CACHE_DIR.exists(): shutil.rmtree(CACHE_DIR)
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
-DATASET_DIR = PROJECT_ROOT / "ODIR-5K"
-os.chdir(DATASET_DIR)
+class Config:
+    # Project paths
+    PROJECT_ROOT = Path(__file__).parent.resolve()
+    try:
+        import google.colab
+        PROJECT_ROOT = Path('/content/drive/MyDrive/Colab Notebooks')
+        CACHE_DIR = Path("/content/cache")
+    except ImportError:
+        CACHE_DIR = PROJECT_ROOT / "cache" / "odir5k_multi_label_classification"
+
+    DATASET_DIR = PROJECT_ROOT / "ODIR-5K"
+
+    # Dataset configuration
+    ANNOTATION_FILE_NAME = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
+    TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images/'
+    TESTING_SOURCE_PATH = 'ODIR-5K_Testing_Images/'
+
+    # Image processing
+    TARGET_SIZE = (230, 230)
+    COLOR_MODE = 'rgb'
+    COLOR_SHAPE_MAP = {'grayscale': (1,), 'rgb': (3,), 'rgba': (4,)}
+    SHAPE_ADD = COLOR_SHAPE_MAP.get(COLOR_MODE, (3,))
+
+    # Model configuration
+    BATCH_SIZE = 32
+    N_EPOCH = 30
+    LEARNING_RATE = 1e-4
+    LOSS = "binary_crossentropy"
+    OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)
+
+    # Metrics
+    ACCURACY = tf.keras.metrics.BinaryAccuracy(name='binary_accuracy')
+    AUC_VALUE = tf.keras.metrics.AUC(name='auc_value', curve='ROC', summation_method='interpolation', multi_label=True)
+    PRECISION = tf.keras.metrics.Precision(thresholds=0.5, name='precision')
+    RECALL = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
+
+    # Model paths
+    MODEL_DIR = PROJECT_ROOT / "Trained_Models" / "ODIR-5K-Multi-Label"
+    MODEL_SAVE_WEIGHTS = str(MODEL_DIR / 'ODIR5K_weights.weights.h5')
+    MODEL_SAVE_FINAL = str(MODEL_DIR / 'ODIR5K_final.keras')
+    CHECKPOINT_PATH = str(MODEL_DIR / 'ODIR5K.keras')
+
+    # Model selection
+    USE_MODEL = "using custom"
+    USE_PRETRAINED_MODEL = False
+
+config = Config()
 
 # %%
-FILE_NAME = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
-df = pd.read_excel(FILE_NAME)
+os.chdir(config.DATASET_DIR)
+
+# %%
+df = pd.read_excel(config.ANNOTATION_FILE_NAME)
 print(df.head())
 
 # %%
@@ -139,13 +177,8 @@ for i in range(len(LABEL_STRINGS)): print(f"{LABEL_STRINGS[i]}: {len(all_key_sin
 #     break
 
 # %%
-TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images/'
-TESTING_SOURCE_PATH = 'ODIR-5K_Testing_Images/'
 
 # %%
-# Define method for image resize, cropping and image Contrast Limited Adaptive Histogram Equalization (CLAHE)
-# using Opencv 4
-
 def resize_image(image_path, dim):
     img = cv2.imread(image_path)
     if img.shape[1] != img.shape[0]:
@@ -165,12 +198,6 @@ def CLAHE(image_path, dim, clipLimit, tileGridSize):
     img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)  # convert from LAB to BGR
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     return img
-
-# %%
-TARGET_SIZE = (230, 230)
-COLOR_MODE = 'rgb'
-COLOR_SHAPE_MAP = {'grayscale': (1,), 'rgb': (3,), 'rgba': (4,)}
-SHAPE_ADD = COLOR_SHAPE_MAP.get(COLOR_MODE, (3,))
 
 # %%
 # Function for generate label to single image
@@ -203,7 +230,7 @@ def process_patient_record(row_idx, df, left_eye_keywords, right_eye_keywords, a
     """Process a single patient record (both eyes) in parallel and generate diagnostic data"""
     results = []
     for fundus_col, keywords_col in [('Left-Fundus', left_eye_keywords), ('Right-Fundus', right_eye_keywords)]:
-        img_path = os.path.join(TRAINING_SOURCE_PATH, df[fundus_col][row_idx])
+        img_path = os.path.join(config.TRAINING_SOURCE_PATH, df[fundus_col][row_idx])
         label, feature, clahe = process_fundus_image_with_clahe(img_path, keywords_col[row_idx], all_key, target_size)
         if label is not None:
             results.append((label, feature, clahe))
@@ -223,7 +250,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         left_eye_keywords=left_eye_keywords,
         right_eye_keywords=right_eye_keywords,
         all_key=all_key_single_label,
-        target_size=TARGET_SIZE
+        target_size=config.TARGET_SIZE
     )
 
     futures = [executor.submit(process_func, i) for i in range(len(df))]
@@ -303,7 +330,7 @@ rescaling_layer = tf.keras.layers.Rescaling(1./255)
 def preprocess_raw_dataset(ds, name):
     ds = ds.map(lambda x, y: (rescaling_layer(tf.cast(x, tf.float32)), y), num_parallel_calls=tf.data.AUTOTUNE)
 
-    cache_dir = CACHE_DIR / 'preprocess_raw_dataset'
+    cache_dir = config.CACHE_DIR / 'preprocess_raw_dataset'
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     for lockfile in cache_dir.glob(f"{name}*.lockfile"):
@@ -354,45 +381,14 @@ validation_generator = (
     .prefetch(buffer_size=tf.data.AUTOTUNE)
 )
 
-# Approximate class weights by looking at the presence of each class (multi-label)
-class_weights = compute_class_weight(class_weight='balanced', classes=np.arange(8), y=np.argmax(training_labels, axis=1))
-class_weight = dict(enumerate(class_weights))
-
 # %%
-USE_MODEL = "using custom"
-USE_PRETRAINED_MODEL = False
-
-INPUT_SHAPE = TARGET_SIZE + SHAPE_ADD
-N_EPOCH = 30
-LEARNING_RATE = 1e-4
-LOSS = "binary_crossentropy"
-OPTIMIZER = tf.keras.optimizers.Adam(LEARNING_RATE)
-
-ACCURACY = tf.keras.metrics.BinaryAccuracy(name='binary_accuracy')
-AUC_VALUE = tf.keras.metrics.AUC(name='auc_value', curve='ROC', summation_method='interpolation', multi_label=True)
-PRECISION = tf.keras.metrics.Precision(thresholds=0.5, name='precision')
-RECALL = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
-
-MODEL_DIR = PROJECT_ROOT / "Trained_Models" / "ODIR-5K-Multi-Label"
-MODEL_DIR.mkdir(parents=True, exist_ok=True)
-MODEL_SAVE_WEIGHTS = str(MODEL_DIR / 'ODIR5K_weights.weights.h5')
-MODEL_SAVE_FINAL = str(MODEL_DIR / 'ODIR5K_final.keras')
-CHECKPOINT_PATH = str(MODEL_DIR / 'ODIR5K.keras')
-
-callbacks = [
-  tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True),
-  tf.keras.callbacks.ModelCheckpoint(CHECKPOINT_PATH, monitor='val_auc_value', save_best_only=True, mode='max', verbose=1),
-  tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1)
-]
-
-# %%
-if os.path.isfile(str(MODEL_SAVE_FINAL)) and USE_PRETRAINED_MODEL:
+if os.path.isfile(str(config.MODEL_SAVE_FINAL)) and config.USE_PRETRAINED_MODEL:
     print("Using saved model")
-    model = tf.keras.models.load_model(str(MODEL_SAVE_FINAL))
+    model = tf.keras.models.load_model(str(config.MODEL_SAVE_FINAL))
 else:
     print("No using saved model")
-    if USE_MODEL == "using custom":
-        inputs = tf.keras.Input(shape=INPUT_SHAPE)
+    if config.USE_MODEL == "using custom":
+        inputs = tf.keras.Input(shape=config.TARGET_SIZE + config.SHAPE_ADD)
 
         # Conv larger kernel
         x = tf.keras.layers.Conv2D(32, (7,7), padding='same', activation='relu')(inputs)
@@ -446,27 +442,39 @@ else:
 
 model.summary(line_length=100)
 model.compile(
-    loss=LOSS,
-    optimizer=OPTIMIZER,
-    metrics=[ACCURACY, AUC_VALUE, PRECISION, RECALL]
+    loss=config.LOSS,
+    optimizer=config.OPTIMIZER,
+    metrics=[config.ACCURACY, config.AUC_VALUE, config.PRECISION, config.RECALL],
 )
 
 # %%
 import gc
 gc.collect()
 
+config.MODEL_DIR.mkdir(parents=True, exist_ok=True)
+
+# Approximate class weights by looking at the presence of each class (multi-label)
+class_weights = compute_class_weight(class_weight='balanced', classes=np.arange(8), y=np.argmax(training_labels, axis=1))
+class_weight = dict(enumerate(class_weights))
+
+callbacks = [
+  tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True),
+  tf.keras.callbacks.ModelCheckpoint(config.CHECKPOINT_PATH, monitor='val_auc_value', save_best_only=True, mode='max', verbose=1),
+  tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1)
+]
+
 history = model.fit(
     train_generator,
     validation_data=validation_generator,
-    epochs=N_EPOCH,
+    epochs=config.N_EPOCH,
     verbose=1,
     class_weight=class_weight,
-    callbacks=callbacks
+    callbacks=callbacks,
 )
 
 # %%
-model.save_weights(MODEL_SAVE_WEIGHTS)
-model.save(MODEL_SAVE_FINAL)
+model.save_weights(config.MODEL_SAVE_WEIGHTS)
+model.save(config.MODEL_SAVE_FINAL)
 
 # %%
 metrics = [
@@ -474,7 +482,7 @@ metrics = [
     ('loss', 'loss', 1),
     ('auc_value', 'AUC value', 3),
     ('precision', 'Precision', 2),
-    ('recall', 'Recall', 4)
+    ('recall', 'Recall', 4),
 ]
 epochs = range(1, len(history.history['loss']) + 1)
 for key, label, loc in metrics:
@@ -486,7 +494,7 @@ for key, label, loc in metrics:
 plt.show()
 
 # %%
-test_list = sorted(f for f in os.listdir(TESTING_SOURCE_PATH) if f.lower().endswith(('.jpg', '.jpeg', '.png')))
+test_list = sorted(f for f in os.listdir(config.TESTING_SOURCE_PATH) if f.lower().endswith(('.jpg', '.jpeg', '.png')))
 
 print(f"{'File Name':<30} {'Predicted Classes':<30} {'Predicted Labels':<20}")
 print(f"Total testing images found: {len(test_list)}")
@@ -497,8 +505,8 @@ count_multiple_diseases = 0
 count_no_disease = 0
 
 for i in range(len(test_list)):
-    source = os.path.join(TESTING_SOURCE_PATH, test_list[i])
-    img = CLAHE(source, TARGET_SIZE, 20, (10,10))
+    source = os.path.join(config.TESTING_SOURCE_PATH, test_list[i])
+    img = CLAHE(source, config.TARGET_SIZE, 20, (10,10))
     img_array = tf.keras.preprocessing.image.img_to_array(img)
     img_array = np.expand_dims(img_array, axis=0)
     img_array = img_array/255.0
