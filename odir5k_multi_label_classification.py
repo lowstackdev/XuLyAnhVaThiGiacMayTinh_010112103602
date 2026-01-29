@@ -25,13 +25,22 @@ print(tf.__version__)
 # %%
 class Config:
     # Project paths
-    PROJECT_ROOT = Path(__file__).parent.resolve()
     try:
         import google.colab
         PROJECT_ROOT = Path('/content/drive/MyDrive/Colab Notebooks')
         CACHE_DIR = Path("/content/cache")
     except ImportError:
-        CACHE_DIR = PROJECT_ROOT / "cache" / "odir5k_multi_label_classification"
+        # Fallback for non-Colab environments where __file__ might be defined
+        # or for local development. We need a way to get the current script's path.
+        # If running in a local script, __file__ would be defined.
+        # If running in a local interactive environment where __file__ isn't defined,
+        # we might need to assume the current working directory.
+        if '__file__' in locals() or '__file__' in globals():
+            PROJECT_ROOT = Path(__file__).parent.resolve()
+        else:
+            PROJECT_ROOT = Path(os.getcwd())
+
+        CACHE_DIR = PROJECT_ROOT / "cache" / "odir5k_multi_class_classification"
 
     DATASET_DIR = PROJECT_ROOT / "ODIR-5K"
 
