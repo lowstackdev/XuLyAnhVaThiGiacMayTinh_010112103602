@@ -259,7 +259,6 @@ del synthetic_labels
 # display_image_samples(validation_paths, "Validation Image Samples", config.COLOR_MODE, config.TARGET_SIZE)
 
 # %%
-@tf.function
 def _get_raw_cached_dataset(self: tf.data.Dataset, name) -> tf.data.Dataset:
     cache_dir = config.CACHE_DIR / '_get_raw_cached_dataset'
     cache_dir.mkdir(parents=True, exist_ok=True)

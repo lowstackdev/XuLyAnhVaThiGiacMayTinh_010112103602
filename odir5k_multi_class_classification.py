@@ -255,7 +255,6 @@ for files, src, dest, name in [
 
 # %%
 # caching data
-@tf.function
 def _get_raw_cached_dataset(self: tf.data.Dataset, name) -> tf.data.Dataset:
     cache_dir = config.CACHE_DIR / '_get_raw_cached_dataset'
     cache_dir.mkdir(parents=True, exist_ok=True)
