@@ -214,7 +214,6 @@ print(f"Total training files: {len(training_files)}")
 print(f"Total validation files: {len(validation_files)}")
 
 # %%
-@tf.function
 def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
     """Organize eye images into diagnosis-specific directories based on keywords"""
     label_mapping = list(zip(all_key_single_label, config.LABEL_STRINGS))
