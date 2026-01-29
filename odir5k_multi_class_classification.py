@@ -25,6 +25,8 @@ class Config:
         import google.colab
         PROJECT_ROOT = Path('/content/drive/MyDrive/Colab Notebooks')
         CACHE_DIR = Path("/content/cache")
+        TRAINING_PATH = "/content/training/"
+        VALIDATION_PATH = "/content/validation/"
     except ImportError:
         # Fallback for non-Colab environments where __file__ might be defined
         # or for local development. We need a way to get the current script's path.
@@ -37,6 +39,8 @@ class Config:
             PROJECT_ROOT = Path(os.getcwd())
 
         CACHE_DIR = PROJECT_ROOT / "cache" / "odir5k_multi_class_classification"
+        TRAINING_PATH = "training/"
+        VALIDATION_PATH = "validation/"
 
     DATASET_DIR = PROJECT_ROOT / "ODIR-5K"
 
@@ -186,10 +190,7 @@ for i in range(len(config.LABEL_STRINGS)): print(f"{config.LABEL_STRINGS[i]}: {l
 #         break
 
 # %%
-TRAINING_PATH = "training/"
-VALIDATION_PATH = "validation/"
-
-for path in [TRAINING_PATH, VALIDATION_PATH]:
+for path in [config.TRAINING_PATH, config.VALIDATION_PATH]:
     shutil.rmtree(path, ignore_errors=True)
     for label in config.LABEL_STRINGS:
         os.makedirs(os.path.join(path, label), exist_ok=True)
@@ -253,8 +254,8 @@ def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
                     break
 
 for files, src, dest, name in [
-    (training_files, config.TRAINING_SOURCE_PATH, TRAINING_PATH, "Training"),
-    (validation_files, config.TRAINING_SOURCE_PATH, VALIDATION_PATH, "Validation"),
+    (training_files, config.TRAINING_SOURCE_PATH, config.TRAINING_PATH, "Training"),
+    (validation_files, config.TRAINING_SOURCE_PATH, config.VALIDATION_PATH, "Validation"),
 ]:
     print(f"\nOrganizing {name} files...")
     organize_eye_images_by_diagnosis(files, src, dest)
@@ -308,7 +309,7 @@ tf.data.Dataset._get_raw_cached_dataset = _get_raw_cached_dataset
 tf.data.Dataset._get_balanced_dataset = _get_balanced_dataset
 
 raw_train_ds = tf.keras.utils.image_dataset_from_directory(
-    TRAINING_PATH,
+    config.TRAINING_PATH,
     labels="inferred",
     label_mode="categorical",
     color_mode=config.COLOR_MODE,
@@ -320,7 +321,7 @@ raw_train_ds = tf.keras.utils.image_dataset_from_directory(
 )
 
 raw_val_ds = tf.keras.utils.image_dataset_from_directory(
-    VALIDATION_PATH,
+    config.VALIDATION_PATH,
     labels="inferred",
     label_mode="categorical",
     color_mode=config.COLOR_MODE,
