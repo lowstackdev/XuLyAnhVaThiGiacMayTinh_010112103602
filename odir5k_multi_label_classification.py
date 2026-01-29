@@ -40,7 +40,7 @@ class Config:
         else:
             PROJECT_ROOT = Path(os.getcwd())
 
-        CACHE_DIR = PROJECT_ROOT / "cache" / "odir5k_multi_class_classification"
+        CACHE_DIR = PROJECT_ROOT / "cache" / "odir5k_multi_label_classification"
 
     DATASET_DIR = PROJECT_ROOT / "ODIR-5K"
 
@@ -282,16 +282,8 @@ def _get_raw_cached_dataset(self: tf.data.Dataset, name) -> tf.data.Dataset:
     return self
 
 # oversampling training data
-@tf.function
 def _get_balanced_dataset(self: tf.data.Dataset, num_classes=8) -> tf.data.Dataset:
-    total_samples = tf.data.experimental.cardinality(self)
-
-    # infinite cardinality case
-    total_samples = tf.cond(
-        tf.equal(total_samples, tf.data.experimental.INFINITE_CARDINALITY),
-        lambda: tf.constant(10000, dtype=tf.int64),
-        lambda: total_samples
-    )
+    total_samples = self.reduce(np.int64(0), lambda x, _: x + 1)
 
     class_datasets = []
     for i in range(num_classes):

@@ -279,16 +279,8 @@ def _get_raw_cached_dataset(self: tf.data.Dataset, name) -> tf.data.Dataset:
     return self
 
 # oversampling data
-@tf.function
 def _get_balanced_dataset(self: tf.data.Dataset, num_classes=8) -> tf.data.Dataset:
-    total_samples = tf.data.experimental.cardinality(self)
-
-    # infinite cardinality case
-    total_samples = tf.cond(
-        tf.equal(total_samples, tf.data.experimental.INFINITE_CARDINALITY),
-        lambda: tf.constant(10000, dtype=tf.int64),
-        lambda: total_samples
-    )
+    total_samples = self.reduce(np.int64(0), lambda x, _: x + 1)
 
     class_datasets = []
     for i in range(num_classes):
@@ -344,7 +336,6 @@ train_generator = (
 validation_generator = (
     raw_val_ds
     ._get_raw_cached_dataset(name="validation")
-    .batch(config.BATCH_SIZE, drop_remainder=False)
     .prefetch(buffer_size=tf.data.AUTOTUNE)
 )
 
