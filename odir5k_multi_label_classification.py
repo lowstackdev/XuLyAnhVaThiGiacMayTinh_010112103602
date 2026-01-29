@@ -18,6 +18,8 @@ from sklearn.model_selection import train_test_split, GroupShuffleSplit
 import cv2
 import tensorflow as tf
 
+# tf.keras.mixed_precision.set_global_policy('mixed_float16')
+
 print(tf.__version__)
 
 # %%
@@ -257,6 +259,7 @@ del synthetic_labels
 # display_image_samples(validation_paths, "Validation Image Samples", config.COLOR_MODE, config.TARGET_SIZE)
 
 # %%
+@tf.function
 def _get_raw_cached_dataset(self: tf.data.Dataset, name) -> tf.data.Dataset:
     cache_dir = config.CACHE_DIR / '_get_raw_cached_dataset'
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -271,8 +274,17 @@ def _get_raw_cached_dataset(self: tf.data.Dataset, name) -> tf.data.Dataset:
     return self
 
 # oversampling training data
+@tf.function
 def _get_balanced_dataset(self: tf.data.Dataset, num_classes=8) -> tf.data.Dataset:
-    total_samples = self.cardinality().numpy()
+    total_samples = tf.data.experimental.cardinality(self)
+
+    # infinite cardinality case
+    total_samples = tf.cond(
+        tf.equal(total_samples, tf.data.experimental.INFINITE_CARDINALITY),
+        lambda: tf.constant(10000, dtype=tf.int64),
+        lambda: total_samples
+    )
+
     class_datasets = []
     for i in range(num_classes):
         class_ds = self.filter(lambda x, y: y[i] == 1).repeat()
@@ -291,10 +303,12 @@ def _get_balanced_dataset(self: tf.data.Dataset, num_classes=8) -> tf.data.Datas
 tf.data.Dataset._get_raw_cached_dataset = _get_raw_cached_dataset
 tf.data.Dataset._get_balanced_dataset = _get_balanced_dataset
 
+@tf.function
 def load_image(path, label):
     image = tf.io.read_file(path)
     return tf.image.decode_jpeg(image, channels=3), label
 
+@tf.function
 def resize_image(image, label):
     return tf.image.resize(image, config.TARGET_SIZE), label
 

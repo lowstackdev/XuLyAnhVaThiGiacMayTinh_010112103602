@@ -2,7 +2,7 @@ import tensorflow as tf
 
 from typing import List
 
-def is_gpu_visibility() -> bool:
+def is_gpu_visible() -> bool:
     """
     Checks whether the GPU is visible from TensorFlow.
     """

@@ -14,6 +14,8 @@ from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn.utils import compute_class_weight
 import tensorflow as tf
 
+# tf.keras.mixed_precision.set_global_policy('mixed_float16')
+
 print(tf.__version__)
 
 # %%
@@ -212,6 +214,7 @@ print(f"Total training files: {len(training_files)}")
 print(f"Total validation files: {len(validation_files)}")
 
 # %%
+@tf.function
 def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
     """Organize eye images into diagnosis-specific directories based on keywords"""
     label_mapping = list(zip(all_key_single_label, config.LABEL_STRINGS))
@@ -253,6 +256,7 @@ for files, src, dest, name in [
 
 # %%
 # caching data
+@tf.function
 def _get_raw_cached_dataset(self: tf.data.Dataset, name) -> tf.data.Dataset:
     cache_dir = config.CACHE_DIR / '_get_raw_cached_dataset'
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -267,8 +271,17 @@ def _get_raw_cached_dataset(self: tf.data.Dataset, name) -> tf.data.Dataset:
     return self
 
 # oversampling data
+@tf.function
 def _get_balanced_dataset(self: tf.data.Dataset, num_classes=8) -> tf.data.Dataset:
-    total_samples = sum(1 for _ in self)
+    total_samples = tf.data.experimental.cardinality(self)
+
+    # infinite cardinality case
+    total_samples = tf.cond(
+        tf.equal(total_samples, tf.data.experimental.INFINITE_CARDINALITY),
+        lambda: tf.constant(10000, dtype=tf.int64),
+        lambda: total_samples
+    )
+
     class_datasets = []
     for i in range(num_classes):
         class_ds = self.filter(lambda x, y: tf.argmax(y) == i).repeat()
