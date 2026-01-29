@@ -187,25 +187,25 @@ def get_index_label(key, all_key):
     return next((i for i, keywords in enumerate(all_key) if key in keywords), -1)
 
 # Return multilabel by index
-def get_multi_label_from_keys(idx_label):
-    return [1 if i in idx_label else 0 for i in range(len(config.LABEL_STRINGS))]
-
-def get_fundus_multi_label(img_path, keywords, all_key):
-    if not os.path.exists(img_path):
-        return None
-
-    # generate multi-label
-    indices = [get_index_label(key, all_key) for key in keywords]
-    indices = list(set(indices))
-    label = get_multi_label_from_keys(indices)
-
-    return label
+def get_multi_label_from_keys(label_idxs):
+    return [1 if i in label_idxs else 0 for i in range(len(config.LABEL_STRINGS))]
 
 def extract_fundus_dataset():
     def process_fundus_entry(filename, keywords, all_key):
         img_path = os.path.join(config.TRAINING_SOURCE_PATH, filename)
         label = get_fundus_multi_label(img_path, keywords, all_key)
         return img_path, label
+
+    def get_fundus_multi_label(img_path, keywords, all_key):
+        if not os.path.exists(img_path):
+            return None
+
+        # generate multi-label
+        indices = [get_index_label(key, all_key) for key in keywords]
+        indices = list(set(indices))
+        label = get_multi_label_from_keys(indices)
+
+        return label
 
     paths, labels = [], []
 
@@ -257,39 +257,25 @@ del synthetic_labels
 # display_image_samples(validation_paths, "Validation Image Samples", config.COLOR_MODE, config.TARGET_SIZE)
 
 # %%
-raw_train_ds = tf.data.Dataset.from_tensor_slices((training_paths, training_labels))
-raw_val_ds = tf.data.Dataset.from_tensor_slices((validation_paths, validation_labels))
-
-def preprocess_raw_dataset(ds, name):
-    def load_image(path, label):
-        image = tf.io.read_file(path)
-        return tf.image.decode_jpeg(image, channels=3), label
-
-    def resize_image(image, label):
-        return tf.image.resize(image, config.TARGET_SIZE), label
-
-    ds = ds.map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
-    ds = ds.map(resize_image, num_parallel_calls=tf.data.AUTOTUNE)
-
-    cache_dir = config.CACHE_DIR / 'preprocess_raw_dataset'
+def _get_raw_cached_dataset(self: tf.data.Dataset, name) -> tf.data.Dataset:
+    cache_dir = config.CACHE_DIR / '_get_raw_cached_dataset'
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    for lockfile in cache_dir.glob("*.lockfile"):
-        try: lockfile.unlink(missing_ok=True)
-        except Exception: pass
+    cache_path = str(cache_dir / f"{name}.cache")
+    self = self.cache(cache_path)
 
-    cache_path = str(cache_dir / name)
-    ds = ds.cache(cache_path)
+    # warmup cache
+    if not (cache_dir / f"{name}.cache").exists():
+        self.enumerate().reduce(np.int64(0), lambda x, _: x + 1)
 
-    ds.ignore_errors().prefetch(tf.data.AUTOTUNE).enumerate().reduce(np.int64(0), lambda x, _: x + 1)
+    return self
 
-    return ds
-
-def get_balanced_train_dataset(cached_ds, num_classes=8):
+# oversampling training data
+def _get_balanced_dataset(self: tf.data.Dataset, num_classes=8) -> tf.data.Dataset:
+    total_samples = self.cardinality().numpy()
     class_datasets = []
-
     for i in range(num_classes):
-        class_ds = cached_ds.filter(lambda x, y: y[i] == 1).repeat()
+        class_ds = self.filter(lambda x, y: y[i] == 1).repeat()
         class_datasets.append(class_ds)
 
     balanced_ds = tf.data.Dataset.sample_from_datasets(
@@ -298,25 +284,39 @@ def get_balanced_train_dataset(cached_ds, num_classes=8):
         stop_on_empty_dataset=False
     )
 
-    total_samples = len(training_paths)
     balanced_ds = balanced_ds.take(total_samples)
     return balanced_ds
 
-# cached datasets
-train_ds_cached = preprocess_raw_dataset(raw_train_ds, name="training")
-val_ds_cached = preprocess_raw_dataset(raw_val_ds, name="validation")
+# extension methods
+tf.data.Dataset._get_raw_cached_dataset = _get_raw_cached_dataset
+tf.data.Dataset._get_balanced_dataset = _get_balanced_dataset
 
-# oversampling training data
-balanced_train_ds = get_balanced_train_dataset(train_ds_cached)
+def load_image(path, label):
+    image = tf.io.read_file(path)
+    return tf.image.decode_jpeg(image, channels=3), label
+
+def resize_image(image, label):
+    return tf.image.resize(image, config.TARGET_SIZE), label
+
+raw_train_ds = tf.data.Dataset.from_tensor_slices((training_paths, training_labels))
+raw_val_ds = tf.data.Dataset.from_tensor_slices((validation_paths, validation_labels))
+
 train_generator = (
-    balanced_train_ds
-    .shuffle(buffer_size=500)
+    raw_train_ds
+    .map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
+    .map(resize_image, num_parallel_calls=tf.data.AUTOTUNE)
+    ._get_raw_cached_dataset(name="training")
+    ._get_balanced_dataset()
+    .shuffle(buffer_size=1000)
     .batch(config.BATCH_SIZE, drop_remainder=False)
     .prefetch(buffer_size=tf.data.AUTOTUNE)
 )
 
 validation_generator = (
-    val_ds_cached
+    raw_val_ds
+    .map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
+    .map(resize_image, num_parallel_calls=tf.data.AUTOTUNE)
+    ._get_raw_cached_dataset(name="validation")
     .batch(config.BATCH_SIZE, drop_remainder=False)
     .prefetch(buffer_size=tf.data.AUTOTUNE)
 )
@@ -476,7 +476,7 @@ for i in range(len(test_list)):
     elif predicted_labels[0]: count_normal += 1
     else: count_single_disease += 1
 
-    # Get labels description
+    # labels description
     active_labels = [s for s, p in zip(config.LABEL_STRINGS, predicted_labels) if p] or ["None"]
 
     # Format and display results

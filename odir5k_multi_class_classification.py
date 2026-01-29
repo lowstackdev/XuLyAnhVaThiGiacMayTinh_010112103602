@@ -183,7 +183,6 @@ for path in [TRAINING_PATH, VALIDATION_PATH]:
     for label in config.LABEL_STRINGS:
         os.makedirs(os.path.join(path, label), exist_ok=True)
 
-# %%
 training_source_files = os.listdir(config.TRAINING_SOURCE_PATH)
 testing_source_files = os.listdir(config.TESTING_SOURCE_PATH)
 
@@ -214,15 +213,15 @@ print(f"Total validation files: {len(validation_files)}")
 
 # %%
 def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
-    "Organize eye images into diagnosis-specific directories based on keywords"
+    """Organize eye images into diagnosis-specific directories based on keywords"""
     label_mapping = list(zip(all_key_single_label, config.LABEL_STRINGS))
 
     for file_name in file_list:
-        # Find matching row in the dataframe
+        # matching row in the dataframe
         nrow = None
         keywords_data = None
 
-        # Check if file matches Left-Fundus or Right-Fundus column
+        # if file matches Left-Fundus or Right-Fundus column
         for col, keywords in [("Left-Fundus", left_eye_keywords), ("Right-Fundus", right_eye_keywords)]:
             for i, val in enumerate(df[col]):
                 if val == file_name:
@@ -235,7 +234,7 @@ def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
         if nrow is None:
             continue
 
-        # Find matching diagnosis label
+        # matching diagnosis label
         for keyword in keywords_data[nrow]:
             for key_list, label_dir in label_mapping:
                 if keyword in key_list:
@@ -253,6 +252,41 @@ for files, src, dest, name in [
         print(f"{name} {label} count: {count}")
 
 # %%
+# caching data
+def _get_raw_cached_dataset(self: tf.data.Dataset, name) -> tf.data.Dataset:
+    cache_dir = config.CACHE_DIR / '_get_raw_cached_dataset'
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    cache_path = str(cache_dir / f"{name}.cache")
+    self = self.cache(cache_path)
+
+    # warmup cache
+    if not (cache_dir / f"{name}.cache").exists():
+        self.enumerate().reduce(np.int64(0), lambda x, _: x + 1)
+
+    return self
+
+# oversampling data
+def _get_balanced_dataset(self: tf.data.Dataset, num_classes=8) -> tf.data.Dataset:
+    total_samples = sum(1 for _ in self)
+    class_datasets = []
+    for i in range(num_classes):
+        class_ds = self.filter(lambda x, y: tf.argmax(y) == i).repeat()
+        class_datasets.append(class_ds)
+
+    balanced_ds = tf.data.Dataset.sample_from_datasets(
+        class_datasets,
+        weights=[1.0/num_classes] * num_classes,
+        stop_on_empty_dataset=False
+    )
+
+    balanced_ds = balanced_ds.take(total_samples)
+    return balanced_ds
+
+# extension methods
+tf.data.Dataset._get_raw_cached_dataset = _get_raw_cached_dataset
+tf.data.Dataset._get_balanced_dataset = _get_balanced_dataset
+
 raw_train_ds = tf.keras.utils.image_dataset_from_directory(
     TRAINING_PATH,
     labels="inferred",
@@ -276,53 +310,19 @@ raw_val_ds = tf.keras.utils.image_dataset_from_directory(
     interpolation="lanczos3"
 )
 
-def preprocess_raw_dataset(ds, name):
-    cache_dir = config.CACHE_DIR / 'preprocess_raw_dataset'
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    for lockfile in cache_dir.glob("*.lockfile"):
-        try: lockfile.unlink(missing_ok=True)
-        except Exception: pass
-
-    cache_path = str(cache_dir / name)
-    ds = ds.cache(cache_path)
-
-    # ds.ignore_errors().prefetch(tf.data.AUTOTUNE).enumerate().reduce(np.int64(0), lambda x, _: x + 1)
-
-    return ds
-
-def get_balanced_train_dataset(cached_ds, num_classes=8):
-    unbatched_ds = cached_ds.unbatch()
-    class_datasets = []
-
-    for i in range(num_classes):
-        class_ds = unbatched_ds.filter(lambda x, y: tf.argmax(y) == i).repeat()
-        class_datasets.append(class_ds)
-
-    balanced_ds = tf.data.Dataset.sample_from_datasets(
-        class_datasets,
-        weights=[1.0/num_classes] * num_classes,
-        stop_on_empty_dataset=False
-    )
-
-    total_samples = len(raw_train_ds.file_paths)
-    balanced_ds = balanced_ds.take(total_samples)
-    return balanced_ds
-
-# cached datasets
-train_ds_cached = preprocess_raw_dataset(raw_train_ds, name="training")
-val_ds_cached = preprocess_raw_dataset(raw_val_ds, name="validation")
-
-# oversampling training data
-balanced_train_ds = get_balanced_train_dataset(train_ds_cached)
 train_generator = (
-    balanced_train_ds
-    .shuffle(buffer_size=500)
+    raw_train_ds
+    ._get_raw_cached_dataset(name="training")
+    .unbatch()
+    ._get_balanced_dataset()
+    .shuffle(buffer_size=1000)
     .batch(config.BATCH_SIZE, drop_remainder=False)
     .prefetch(buffer_size=tf.data.AUTOTUNE)
 )
 
 validation_generator = (
-    val_ds_cached
+    raw_val_ds
+    ._get_raw_cached_dataset(name="validation")
     .batch(config.BATCH_SIZE, drop_remainder=False)
     .prefetch(buffer_size=tf.data.AUTOTUNE)
 )
