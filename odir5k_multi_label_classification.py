@@ -451,6 +451,9 @@ model.save_weights(config.MODEL_SAVE_WEIGHTS)
 model.save(config.MODEL_SAVE_FINAL)
 
 # %%
+model.evaluate(validation_generator)
+
+# %%
 metrics = [
     ('binary_accuracy', 'accuracy'),
     ('loss', 'loss'),

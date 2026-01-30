@@ -454,6 +454,9 @@ model.save_weights(config.MODEL_SAVE_WEIGHTS)
 model.save(config.MODEL_SAVE_FINAL)
 
 # %%
+model.evaluate(validation_generator)
+
+# %%
 metrics = [
     ("accuracy", "accuracy"),
     ("loss", "loss"),
@@ -469,9 +472,6 @@ for key, label in metrics:
     plt.legend()
     plt.figure()
 plt.show()
-
-# %%
-model.evaluate(validation_generator)
 
 # %%
 test_images = []
