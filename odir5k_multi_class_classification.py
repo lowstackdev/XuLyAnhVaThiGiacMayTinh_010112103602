@@ -8,10 +8,13 @@ import time
 from random import sample
 import uuid
 import re
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import cv2
 from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn.utils import compute_class_weight
 import tensorflow as tf
@@ -171,34 +174,107 @@ print(f"Total training files: {len(training_files)}")
 print(f"Total validation files: {len(validation_files)}")
 
 # %%
+def load_image(path, label=None):
+    image = tf.io.read_file(path)
+    image = tf.image.decode_jpeg(image, channels=3)
+    return image, label
+
+def resize_image(image, label=None):
+    image = tf.image.resize_with_pad(
+        image, config.TARGET_SIZE[0],
+        config.TARGET_SIZE[1],
+        method=tf.image.ResizeMethod.BILINEAR
+    )
+    image.set_shape([config.TARGET_SIZE[0], config.TARGET_SIZE[1], 3])
+    return image, label
+
+def crop_image(image, label=None):
+    mask = tf.reduce_sum(image, axis=-1) > 10
+    non_zero_coords = tf.where(mask)
+
+    if tf.shape(non_zero_coords)[0] == 0:
+        return image, label
+
+    y_min = tf.cast(tf.reduce_min(non_zero_coords[:, 0]), tf.int32)
+    y_max = tf.cast(tf.reduce_max(non_zero_coords[:, 0]), tf.int32)
+    x_min = tf.cast(tf.reduce_min(non_zero_coords[:, 1]), tf.int32)
+    x_max = tf.cast(tf.reduce_max(non_zero_coords[:, 1]), tf.int32)
+
+    image = tf.image.crop_to_bounding_box(image, y_min, x_min, y_max - y_min + 1, x_max - x_min + 1)
+    return image, label
+
+def CLAHE(image, label=None):
+    # uint8 format (0-255)
+    image = tf.cast(image, tf.uint8)
+    image_shape = image.shape
+
+    # input numpy array
+    image = tf.numpy_function(func=clahe_cv2, inp=[image], Tout=tf.uint8)
+
+    # Reset shape
+    image.set_shape(image_shape)
+    return image, label
+
+def clahe_cv2(image):
+    # input numpy array
+    if not isinstance(image, np.ndarray):
+        image = np.array(image)
+
+    # RGB to LAB
+    lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+    l, a, b = cv2.split(lab)
+
+    # CLAHE to the L-channel
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+
+    # Merge channels + convert back to RGB
+    lab = cv2.merge((l, a, b))
+    image_res = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+    return image_res
+
+def process_single_image(file_name, source_path, dest_path, label_mapping):
+    file_to_keywords = {}
+    for i, row in df.iterrows():
+        file_to_keywords[row["Left-Fundus"]] = left_eye_keywords[i]
+        file_to_keywords[row["Right-Fundus"]] = right_eye_keywords[i]
+
+    keywords = file_to_keywords.get(file_name)
+    if not keywords:
+        return
+
+    for keyword in keywords:
+        found_label = False
+        for key_list, label_dir in label_mapping:
+            if keyword in key_list:
+                src_full_path = os.path.join(source_path, file_name)
+                dest_full_path = os.path.join(dest_path, label_dir, file_name)
+
+                # Preprocessing
+                try:
+                    img, _ = load_image(src_full_path)
+                    img, _ = crop_image(img)
+                    img, _ = resize_image(img)
+                    img, _ = CLAHE(img)
+
+                    # Save
+                    img_numpy = img.numpy()
+                    img_bgr = cv2.cvtColor(img_numpy, cv2.COLOR_RGB2BGR)
+                    cv2.imwrite(dest_full_path, img_bgr)
+                    found_label = True
+                except Exception:
+                    pass
+                break
+        if found_label:
+            break
+
 def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
-    """Organize eye images into diagnosis-specific directories based on keywords"""
+    """Organize eye images into diagnosis-specific directories with parallel preprocessing"""
     label_mapping = list(zip(all_diagostic_keywords, config.LABELS))
 
-    for file_name in file_list:
-        # matching row in the dataframe
-        nrow = None
-        keywords_data = None
-
-        # if file matches Left-Fundus or Right-Fundus column
-        for col, keywords in [("Left-Fundus", left_eye_keywords), ("Right-Fundus", right_eye_keywords)]:
-            for i, val in enumerate(df[col]):
-                if val == file_name:
-                    nrow = i
-                    keywords_data = keywords
-                    break
-            if nrow is not None:
-                break
-
-        if nrow is None:
-            continue
-
-        # matching diagnosis label
-        for keyword in keywords_data[nrow]:
-            for key_list, label_dir in label_mapping:
-                if keyword in key_list:
-                    shutil.copy(source_path + file_name, os.path.join(dest_path, label_dir))
-                    break
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        worker_fn = partial(process_single_image, source_path=source_path, dest_path=dest_path, label_mapping=label_mapping)
+        executor.map(worker_fn, file_list)
 
 for files, src, dest, name in [
     (training_files, config.TRAINING_SOURCE_PATH, config.TRAINING_PATH, "Training"),
