@@ -54,7 +54,7 @@ class Config:
     VALIDATION_FRACTION = 0.1
 
     # Image processing
-    TARGET_SIZE = (230, 230)
+    TARGET_SIZE = (512, 512)
     COLOR_MODE = "rgb"
     COLOR_SHAPE_MAP = {"grayscale": (1,), "rgb": (3,), "rgba": (4,)}
     SHAPE_ADD = COLOR_SHAPE_MAP.get(COLOR_MODE, (3,))
@@ -215,6 +215,10 @@ for files, src, dest, name in [
 def _get_raw_cached_dataset(self: tf.data.Dataset, name) -> tf.data.Dataset:
     cache_dir = config.CACHE_DIR / '_get_raw_cached_dataset'
     cache_dir.mkdir(parents=True, exist_ok=True)
+
+    for lockfile in cache_dir.glob("*.lockfile"):
+        try: lockfile.unlink(missing_ok=True)
+        except Exception: pass
 
     cache_path = str(cache_dir / f"{name}.cache")
     self = self.cache(cache_path)

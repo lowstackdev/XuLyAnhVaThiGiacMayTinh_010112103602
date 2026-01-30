@@ -54,7 +54,7 @@ class Config:
     VALIDATION_FRACTION = 0.1
 
     # Image processing
-    TARGET_SIZE = (230, 230)
+    TARGET_SIZE = (512, 512)
     COLOR_MODE = 'rgb'
     COLOR_SHAPE_MAP = {'grayscale': (1,), 'rgb': (3,), 'rgba': (4,)}
     SHAPE_ADD = COLOR_SHAPE_MAP.get(COLOR_MODE, (3,))
@@ -215,6 +215,10 @@ def _get_raw_cached_dataset(self: tf.data.Dataset, name) -> tf.data.Dataset:
     cache_dir = config.CACHE_DIR / '_get_raw_cached_dataset'
     cache_dir.mkdir(parents=True, exist_ok=True)
 
+    for lockfile in cache_dir.glob("*.lockfile"):
+        try: lockfile.unlink(missing_ok=True)
+        except Exception: pass
+
     cache_path = str(cache_dir / f"{name}.cache")
     self = self.cache(cache_path)
 
@@ -249,11 +253,65 @@ tf.data.Dataset._get_balanced_dataset = _get_balanced_dataset
 @tf.function
 def load_image(path, label):
     image = tf.io.read_file(path)
-    return tf.image.decode_jpeg(image, channels=3), label
+    image = tf.image.decode_jpeg(image, channels=3)
+    return image, label
 
 @tf.function
 def resize_image(image, label):
-    return tf.image.resize(image, config.TARGET_SIZE), label
+    image = tf.image.resize_with_pad(
+        image, config.TARGET_SIZE[0],
+        config.TARGET_SIZE[1],
+        method=tf.image.ResizeMethod.BILINEAR
+    )
+    image.set_shape([config.TARGET_SIZE[0], config.TARGET_SIZE[1], 3])
+    return image, label
+
+@tf.function
+def crop_image(image, label):
+    mask = tf.reduce_sum(image, axis=-1) > 10
+    non_zero_coords = tf.where(mask)
+
+    if tf.shape(non_zero_coords)[0] == 0:
+        return image, label
+
+    y_min = tf.cast(tf.reduce_min(non_zero_coords[:, 0]), tf.int32)
+    y_max = tf.cast(tf.reduce_max(non_zero_coords[:, 0]), tf.int32)
+    x_min = tf.cast(tf.reduce_min(non_zero_coords[:, 1]), tf.int32)
+    x_max = tf.cast(tf.reduce_max(non_zero_coords[:, 1]), tf.int32)
+
+    image = tf.image.crop_to_bounding_box(image, y_min, x_min, y_max - y_min + 1, x_max - x_min + 1)
+    return image, label
+
+@tf.function
+def CLAHE(image, label):
+    # uint8 format (0-255)
+    image = tf.cast(image, tf.uint8)
+    image_shape = image.shape
+
+    # input numpy array
+    image = tf.numpy_function(func=clahe_cv2, inp=[image], Tout=tf.uint8)
+
+    # Reset shape
+    image.set_shape(image_shape)
+    return image, label
+
+def clahe_cv2(image):
+    # input numpy array
+    if not isinstance(image, np.ndarray):
+        image = np.array(image)
+
+    # RGB to LAB
+    lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+    l, a, b = cv2.split(lab)
+
+    # CLAHE to the L-channel
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+
+    # Merge channels + convert back to RGB
+    lab = cv2.merge((l, a, b))
+    image_res = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+    return image_res
 
 raw_train_ds = tf.data.Dataset.from_tensor_slices((training_paths, training_labels))
 raw_val_ds = tf.data.Dataset.from_tensor_slices((validation_paths, validation_labels))
@@ -261,7 +319,9 @@ raw_val_ds = tf.data.Dataset.from_tensor_slices((validation_paths, validation_la
 train_generator = (
     raw_train_ds
     .map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
+    .map(crop_image, num_parallel_calls=tf.data.AUTOTUNE)
     .map(resize_image, num_parallel_calls=tf.data.AUTOTUNE)
+    .map(CLAHE, num_parallel_calls=tf.data.AUTOTUNE)
     ._get_raw_cached_dataset(name="training")
     ._get_balanced_dataset()
     .shuffle(buffer_size=1000)
@@ -272,7 +332,9 @@ train_generator = (
 validation_generator = (
     raw_val_ds
     .map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
+    .map(crop_image, num_parallel_calls=tf.data.AUTOTUNE)
     .map(resize_image, num_parallel_calls=tf.data.AUTOTUNE)
+    .map(CLAHE, num_parallel_calls=tf.data.AUTOTUNE)
     ._get_raw_cached_dataset(name="validation")
     .batch(config.BATCH_SIZE, drop_remainder=False)
     .prefetch(buffer_size=tf.data.AUTOTUNE)
