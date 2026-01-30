@@ -8,6 +8,8 @@ from random import sample
 import uuid
 import concurrent.futures
 from functools import partial
+import re
+from collections import defaultdict, Counter
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -48,7 +50,7 @@ class Config:
     ANNOTATION_FILE_NAME = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
     TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images/'
     TESTING_SOURCE_PATH = 'ODIR-5K_Testing_Images/'
-    LABEL_STRINGS = ['Normal', 'Diabetes', 'Glaucoma', 'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Abnormalities']
+    LABELS = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
     VALIDATION_FRACTION = 0.1
 
     # Image processing
@@ -93,102 +95,43 @@ print(df.head())
 left_eye_keywords = df['Left-Diagnostic Keywords'].copy()
 right_eye_keywords = df['Right-Diagnostic Keywords'].copy()
 
-left_eye_keywords = left_eye_keywords.str.split("，")
-right_eye_keywords = right_eye_keywords.str.split("，")
+left_eye_keywords = left_eye_keywords.str.split(re.compile(r'[,，]'))
+right_eye_keywords = right_eye_keywords.str.split(re.compile(r'[,，]'))
 
 # %%
-# mlb = MultiLabelBinarizer()
+labels_dict = defaultdict(Counter)
+all_diagostic_keywords = [[] for _ in range(len(config.LABELS))]
+keyword_label_map = {}
 
-# combined_keywords = pd.concat([left_eye_keywords, right_eye_keywords])
-# mlb.fit(combined_keywords)
+for _, row in df.iterrows():
+    keywords = []
+    for col in ["Left-Diagnostic Keywords", "Right-Diagnostic Keywords"]:
+        if isinstance(row[col], str):
+            kws = re.split(r'[,，]', row[col])
+            keywords.extend([kw.strip() for kw in kws if kw.strip()])
 
-# all_diagnosis = list(mlb.classes_)
-# print("Total different keys diagnosis:", len(all_diagnosis))
+    vec = row[config.LABELS].to_numpy()
+    active_idx = np.where(vec == 1)[0]
 
-# %%
-test_df = df.copy()
-LABEL_COLS = test_df.columns[7:]
+    for kw in keywords:
+        for i in active_idx:
+            lab = config.LABELS[i]
+            labels_dict[lab][kw] += 1
 
-def get_key_diagnosis_single(col_name):
-    # Get other diagnosis columns
-    other_diag_cols = [col for col in LABEL_COLS if col != col_name]
+        counts = [labels_dict[config.LABELS[i]][kw] for i in active_idx]
+        best_idx = active_idx[np.argmax(counts)]
+        best_lab = config.LABELS[best_idx]
 
-    # Find rows where target column == 1 AND all other diagnosis columns == 0
-    single_rows = test_df[(test_df[col_name] == 1) & (test_df[other_diag_cols].sum(axis=1) == 0)].index
+        if kw not in keyword_label_map or labels_dict[best_lab][kw] > labels_dict[config.LABELS[keyword_label_map[kw]]][kw]:
+            if kw in keyword_label_map:
+                old_label_index = keyword_label_map[kw]
+                if kw in all_diagostic_keywords[old_label_index]:
+                    all_diagostic_keywords[old_label_index].remove(kw)
 
-    unique_keywords = set().union(*[set(left_eye_keywords[row]) | set(right_eye_keywords[row]) for row in single_rows])
+            keyword_label_map[kw] = best_idx
+            all_diagostic_keywords[best_idx].append(kw)
 
-    return list(unique_keywords)
-
-all_key_single_label = [get_key_diagnosis_single(test_df.columns[7 + i]) for i in range(len(config.LABEL_STRINGS))]
-print("All keys:", sum(len(x) for x in all_key_single_label))
-for i in range(len(config.LABEL_STRINGS)): print(f"{config.LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
-
-# %%
-# all_key_sets = [set(keywords) for keywords in all_key_single_label]
-
-# # Remove "normal" keyword from all groups
-# normal_keywords = all_key_sets[0]
-# all_key_sets[1:] = [keywords - normal_keywords for keywords in all_key_sets[1:]]
-
-# # Remove duplicate keywords between groups
-# for i, current in enumerate(all_key_sets):
-#     for next in all_key_sets[i + 1 :]:
-#         next -= current & next
-
-# all_key_single_label = [list(keywords) for keywords in all_key_sets]
-# print("Intersected:", sum(len(x) for x in all_key_single_label))
-# for i in range(len(config.LABEL_STRINGS)): print(f"{config.LABEL_STRINGS[i]}: {len(all_key_single_label[i])} | {all_key_single_label[i]}")
-
-# %%
-# %%
-# double_diagnosis_row = test_df[test_df[LABEL_COLS].sum(axis=1) > 1].index.tolist()
-# double_diagnosis_row = sorted(set(double_diagnosis_row))
-
-# not_listed = {
-#     keyword
-#     for row in double_diagnosis_row
-#     for keyword in left_eye_keywords[row] + right_eye_keywords[row]
-#     if keyword not in all_key_single_label
-# }
-
-# print("Double label row:", len(double_diagnosis_row))
-# print("Not listed diagnosis key:", len(not_listed))
-
-# def get_all_recognized_key(all_key):
-#     return list(set([keyword for keywords in all_key for keyword in set(keywords)]))
-
-# def intersect_from_multi_label(keyword_groups):
-#     known_keywords = set().union(*keyword_groups)
-#     unrecognized_keywords = set()
-
-#     for record_idx in double_diagnosis_row:
-#         keywords = left_eye_keywords[record_idx] + right_eye_keywords[record_idx]
-#         undiscovered = set(kw for kw in keywords if kw not in known_keywords)
-
-#         if undiscovered:
-#             related_groups = [col_idx - 7 for col_idx in range(7, len(test_df.columns)) if test_df.iloc[record_idx, col_idx] == 1]
-
-#         if len(related_groups) == 1 and len(undiscovered) == 1:
-#             keyword_groups[related_groups[0]].append(undiscovered.pop())
-#             known_keywords.add(keyword_groups[related_groups[0]][-1])
-#         else:
-#             unrecognized_keywords.update(undiscovered)
-
-#     return keyword_groups, list(unrecognized_keywords)
-
-# # Process until convergence
-# prev_count = 0
-# while True:
-#   prev_count = len(all_key_diagnosis)
-#   all_key_single_label, unrecognized_keywords_list = intersect_from_multi_label(all_key_single_label)
-#   all_key_diagnosis = get_all_recognized_key(all_key_single_label)
-#   print(unrecognized_keywords_list)
-#   if len(all_key_diagnosis) == prev_count:
-#     print(True)
-#     break
-
-# %%
+all_diagostic_keywords = [list(set(keywords)) for keywords in all_diagostic_keywords]
 
 # %%
 # Function for generate label to single image
@@ -199,7 +142,7 @@ def get_index_label(key, all_key):
 
 # Return multilabel by index
 def get_multi_label_from_keys(label_idxs):
-    return [1 if i in label_idxs else 0 for i in range(len(config.LABEL_STRINGS))]
+    return [1 if i in label_idxs else 0 for i in range(len(config.LABELS))]
 
 def extract_fundus_dataset():
     def process_fundus_entry(filename, keywords, all_key):
@@ -222,7 +165,7 @@ def extract_fundus_dataset():
 
     for col, keywords in [('Left-Fundus', left_eye_keywords), ('Right-Fundus', right_eye_keywords)]:
         for filename, keywords in zip(df[col], keywords):
-            path, label = process_fundus_entry(filename, keywords, all_key_single_label)
+            path, label = process_fundus_entry(filename, keywords, all_diagostic_keywords)
             if label: paths.append(path); labels.append(label)
 
     return np.array(paths), np.array(labels)
@@ -491,7 +434,7 @@ for i in range(len(test_list)):
     else: count_single_disease += 1
 
     # labels description
-    active_labels = [s for s, p in zip(config.LABEL_STRINGS, predicted_labels) if p] or ["None"]
+    active_labels = [s for s, p in zip(config.LABELS, predicted_labels) if p] or ["None"]
 
     # Format and display results
     filename = os.path.basename(source)
