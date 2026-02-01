@@ -30,8 +30,8 @@ class Config:
         import google.colab
         PROJECT_ROOT = Path('/content/drive/MyDrive/Colab Notebooks')
         CACHE_DIR = Path("/content/cache")
-        TRAINING_PATH = "/content/training/"
-        VALIDATION_PATH = "/content/validation/"
+        TRAINING_PATH = "/content/training"
+        VALIDATION_PATH = "/content/validation"
     except ImportError:
         # Fallback for non-Colab environments where __file__ might be defined
         # or for local development. We need a way to get the current script's path.
@@ -43,16 +43,16 @@ class Config:
         else:
             PROJECT_ROOT = Path(os.getcwd())
 
-        CACHE_DIR = PROJECT_ROOT / "cache" / "odir5k_multi_class_classification"
-        TRAINING_PATH = "training/"
-        VALIDATION_PATH = "validation/"
+        CACHE_DIR = Path(f"{PROJECT_ROOT}/cache/odir5k_multi_class_classification")
+        TRAINING_PATH = "training"
+        VALIDATION_PATH = "validation"
 
     DATASET_DIR = PROJECT_ROOT / "ODIR-5K"
 
     # Dataset configuration
     ANNOTATION_FILE_NAME = "ODIR-5K_Training_Annotations(Updated)_V2.xlsx"
-    TRAINING_SOURCE_PATH = "ODIR-5K_Training_Images/"
-    TESTING_SOURCE_PATH = "ODIR-5K_Testing_Images/"
+    TRAINING_SOURCE_PATH = "ODIR-5K_Training_Images"
+    TESTING_SOURCE_PATH = "ODIR-5K_Testing_Images"
     LABELS = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
     VALIDATION_FRACTION = 0.1
 
@@ -174,107 +174,36 @@ print(f"Total training files: {len(training_files)}")
 print(f"Total validation files: {len(validation_files)}")
 
 # %%
-def load_image(path, label=None):
-    image = tf.io.read_file(path)
-    image = tf.image.decode_jpeg(image, channels=3)
-    return image, label
-
-def resize_image(image, label=None):
-    image = tf.image.resize_with_pad(
-        image, config.TARGET_SIZE[0],
-        config.TARGET_SIZE[1],
-        method=tf.image.ResizeMethod.BILINEAR
-    )
-    image.set_shape([config.TARGET_SIZE[0], config.TARGET_SIZE[1], 3])
-    return image, label
-
-def crop_image(image, label=None):
-    mask = tf.reduce_sum(image, axis=-1) > 10
-    non_zero_coords = tf.where(mask)
-
-    if tf.shape(non_zero_coords)[0] == 0:
-        return image, label
-
-    y_min = tf.cast(tf.reduce_min(non_zero_coords[:, 0]), tf.int32)
-    y_max = tf.cast(tf.reduce_max(non_zero_coords[:, 0]), tf.int32)
-    x_min = tf.cast(tf.reduce_min(non_zero_coords[:, 1]), tf.int32)
-    x_max = tf.cast(tf.reduce_max(non_zero_coords[:, 1]), tf.int32)
-
-    image = tf.image.crop_to_bounding_box(image, y_min, x_min, y_max - y_min + 1, x_max - x_min + 1)
-    return image, label
-
-def CLAHE(image, label=None):
-    # uint8 format (0-255)
-    image = tf.cast(image, tf.uint8)
-    image_shape = image.shape
-
-    # input numpy array
-    image = tf.numpy_function(func=clahe_cv2, inp=[image], Tout=tf.uint8)
-
-    # Reset shape
-    image.set_shape(image_shape)
-    return image, label
-
-def clahe_cv2(image):
-    # input numpy array
-    if not isinstance(image, np.ndarray):
-        image = np.array(image)
-
-    # RGB to LAB
-    lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
-    l, a, b = cv2.split(lab)
-
-    # CLAHE to the L-channel
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l = clahe.apply(l)
-
-    # Merge channels + convert back to RGB
-    lab = cv2.merge((l, a, b))
-    image_res = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
-    return image_res
-
-def process_single_image(file_name, source_path, dest_path, label_mapping):
-    file_to_keywords = {}
-    for i, row in df.iterrows():
-        file_to_keywords[row["Left-Fundus"]] = left_eye_keywords[i]
-        file_to_keywords[row["Right-Fundus"]] = right_eye_keywords[i]
-
-    keywords = file_to_keywords.get(file_name)
-    if not keywords:
-        return
-
-    for keyword in keywords:
-        found_label = False
-        for key_list, label_dir in label_mapping:
-            if keyword in key_list:
-                src_full_path = os.path.join(source_path, file_name)
-                dest_full_path = os.path.join(dest_path, label_dir, file_name)
-
-                # Preprocessing
-                try:
-                    img, _ = load_image(src_full_path)
-                    img, _ = crop_image(img)
-                    img, _ = resize_image(img)
-                    img, _ = CLAHE(img)
-
-                    # Save
-                    img_numpy = img.numpy()
-                    img_bgr = cv2.cvtColor(img_numpy, cv2.COLOR_RGB2BGR)
-                    cv2.imwrite(dest_full_path, img_bgr)
-                    found_label = True
-                except Exception:
-                    pass
-                break
-        if found_label:
-            break
-
 def organize_eye_images_by_diagnosis(file_list, source_path, dest_path):
-    """Organize eye images into diagnosis-specific directories with parallel preprocessing"""
+    """Organize eye images into diagnosis-specific directories based on keywords"""
     label_mapping = list(zip(all_diagostic_keywords, config.LABELS))
 
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        worker_fn = partial(process_single_image, source_path=source_path, dest_path=dest_path, label_mapping=label_mapping)
-        executor.map(worker_fn, file_list)
+    for file_name in file_list:
+        # matching row in the dataframe
+        nrow = None
+        keywords_data = None
+
+        # if file matches Left-Fundus or Right-Fundus column
+        for col, keywords in [("Left-Fundus", left_eye_keywords), ("Right-Fundus", right_eye_keywords)]:
+            for i, val in enumerate(df[col]):
+                if val == file_name:
+                    nrow = i
+                    keywords_data = keywords
+                    break
+            if nrow is not None:
+                break
+
+        if nrow is None:
+            continue
+
+        # matching diagnosis label
+        for keyword in keywords_data[nrow]:
+            for key_list, label_dir in label_mapping:
+                if keyword in key_list:
+                    src_path = os.path.join(source_path, file_name)
+                    dest_full_path = os.path.join(dest_path, label_dir, file_name)
+                    shutil.copy(src_path, dest_full_path)
+                    break
 
 for files, src, dest, name in [
     (training_files, config.TRAINING_SOURCE_PATH, config.TRAINING_PATH, "Training"),
@@ -327,33 +256,83 @@ def _get_balanced_dataset(self: tf.data.Dataset, num_classes=8) -> tf.data.Datas
 tf.data.Dataset._get_raw_cached_dataset = _get_raw_cached_dataset
 tf.data.Dataset._get_balanced_dataset = _get_balanced_dataset
 
-raw_train_ds = tf.keras.utils.image_dataset_from_directory(
-    config.TRAINING_PATH,
-    labels="inferred",
-    label_mode="categorical",
-    color_mode=config.COLOR_MODE,
-    batch_size=config.BATCH_SIZE,
-    image_size=config.TARGET_SIZE,
-    shuffle=True,
-    seed=42,
-    interpolation="lanczos3"
-)
+def load_image(path):
+    image = tf.io.read_file(path)
+    image = tf.image.decode_jpeg(image, channels=3)
+    return image
 
-raw_val_ds = tf.keras.utils.image_dataset_from_directory(
-    config.VALIDATION_PATH,
-    labels="inferred",
-    label_mode="categorical",
-    color_mode=config.COLOR_MODE,
-    batch_size=config.BATCH_SIZE,
-    image_size=config.TARGET_SIZE,
-    shuffle=False,
-    interpolation="lanczos3"
-)
+def resize_image(image):
+    image = tf.image.resize_with_pad(
+        image, config.TARGET_SIZE[0],
+        config.TARGET_SIZE[1],
+        method=tf.image.ResizeMethod.BILINEAR
+    )
+    image.set_shape([config.TARGET_SIZE[0], config.TARGET_SIZE[1], 3])
+    return image
+
+def crop_image(image):
+    mask = tf.reduce_sum(image, axis=-1) > 10
+    non_zero_coords = tf.where(mask)
+
+    if tf.shape(non_zero_coords)[0] == 0:
+        return image
+
+    y_min = tf.cast(tf.reduce_min(non_zero_coords[:, 0]), tf.int32)
+    y_max = tf.cast(tf.reduce_max(non_zero_coords[:, 0]), tf.int32)
+    x_min = tf.cast(tf.reduce_min(non_zero_coords[:, 1]), tf.int32)
+    x_max = tf.cast(tf.reduce_max(non_zero_coords[:, 1]), tf.int32)
+
+    image = tf.image.crop_to_bounding_box(image, y_min, x_min, y_max - y_min + 1, x_max - x_min + 1)
+    return image
+
+def CLAHE(image):
+    # uint8 format (0-255)
+    image = tf.cast(image, tf.uint8)
+    image_shape = image.shape
+
+    # input numpy array
+    image = tf.numpy_function(func=clahe_cv2, inp=[image], Tout=tf.uint8)
+
+    # Reset shape
+    image.set_shape(image_shape)
+    return image
+
+def clahe_cv2(image):
+    # input numpy array
+    if not isinstance(image, np.ndarray):
+        image = np.array(image)
+
+    # RGB to LAB
+    lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+    l, a, b = cv2.split(lab)
+
+    # CLAHE to the L-channel
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+
+    # Merge channels + convert back to RGB
+    lab = cv2.merge((l, a, b))
+    image_res = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+    return image_res
+
+def get_label_from_dir(file_path):
+    normalized_path = tf.strings.regex_replace(file_path, "\\\\", "/")
+    parts = tf.strings.split(normalized_path, "/")
+    label_name = parts[-2]
+    labels_tensor = tf.constant(config.LABELS)
+    one_hot = tf.equal(label_name, labels_tensor)
+    return tf.cast(one_hot, tf.float32)
+
+raw_train_ds = tf.data.Dataset.list_files(f"{config.TRAINING_PATH}/*/*.jpg")
+raw_val_ds = tf.data.Dataset.list_files(f"{config.VALIDATION_PATH}/*/*.jpg")
 
 train_generator = (
     raw_train_ds
+    .map(lambda path: (load_image(path), get_label_from_dir(path)), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (crop_image(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (resize_image(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (CLAHE(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
     ._get_raw_cached_dataset(name="training")
-    .unbatch()
     ._get_balanced_dataset()
     .shuffle(buffer_size=1000)
     .batch(config.BATCH_SIZE, drop_remainder=False)
@@ -362,7 +341,12 @@ train_generator = (
 
 validation_generator = (
     raw_val_ds
+    .map(lambda path: (load_image(path), get_label_from_dir(path)), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (crop_image(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (resize_image(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (CLAHE(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
     ._get_raw_cached_dataset(name="validation")
+    .batch(config.BATCH_SIZE, drop_remainder=False)
     .prefetch(buffer_size=tf.data.AUTOTUNE)
 )
 
@@ -373,22 +357,16 @@ if os.path.isfile(str(config.MODEL_SAVE_FINAL)) and config.USE_PRETRAINED_MODEL:
 else:
     print("No using saved model")
     if config.USE_MODEL == "using custom":
-        augmentation_layers = tf.keras.Sequential([
-            tf.keras.layers.RandomRotation(factor=0.1, fill_mode="nearest"),
-            tf.keras.layers.RandomZoom(height_factor=0.15, width_factor=0.15, fill_mode="nearest"),
-            tf.keras.layers.RandomTranslation(height_factor=0.05, width_factor=0.05, fill_mode="nearest"),
-            tf.keras.layers.RandomBrightness(factor=0.15, value_range=(0, 1)),
-            tf.keras.layers.RandomContrast(factor=0.15),
-            tf.keras.layers.GaussianNoise(stddev=0.01),
-            tf.keras.layers.RandomZoom(height_factor=(-0.02, 0.02), width_factor=(-0.02, 0.02), fill_mode="nearest"),
-        ])
-
-        rescaling_layer = tf.keras.layers.Rescaling(1./255)
-
         model = tf.keras.models.Sequential([
                 tf.keras.Input(shape=config.TARGET_SIZE + config.SHAPE_ADD),
-                rescaling_layer,
-                augmentation_layers,
+                tf.keras.layers.Rescaling(1./255),
+
+                tf.keras.layers.RandomFlip("horizontal_and_vertical"),
+                tf.keras.layers.RandomRotation(factor=0.05, fill_mode="constant", fill_value=0.0),
+                tf.keras.layers.RandomZoom(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode="constant"),
+                tf.keras.layers.RandomBrightness(factor=0.2, value_range=(0, 1)),
+                tf.keras.layers.RandomContrast(factor=0.2),
+
                 # Block 1
                 tf.keras.layers.Conv2D(32, (3, 3), activation="relu"),
                 tf.keras.layers.Conv2D(32, (3, 3), activation="relu"),
@@ -410,11 +388,12 @@ else:
                 tf.keras.layers.MaxPooling2D(2, 2),
                 tf.keras.layers.BatchNormalization(),
                 # Classifier
-                tf.keras.layers.Flatten(),
+                tf.keras.layers.GlobalAveragePooling2D(),
                 tf.keras.layers.Dense(256, activation="relu"),
                 tf.keras.layers.Dense(64, activation="relu"),
                 tf.keras.layers.BatchNormalization(),
-                tf.keras.layers.Dense(8, activation="softmax")])
+                tf.keras.layers.Dense(8, activation="softmax")
+        ])
 
 model.summary(line_length=100)
 model.compile(
@@ -430,7 +409,7 @@ gc.collect()
 config.MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 # Calculate class weights from raw training data to handle class imbalance
-y_train = np.concatenate([np.argmax(y.numpy(), axis=1) for x, y in raw_train_ds.map(lambda x, y: (x, y), num_parallel_calls=tf.data.AUTOTUNE)])
+y_train = np.array([np.argmax(get_label_from_dir(path).numpy()) for path in raw_train_ds])
 class_weights = compute_class_weight('balanced', classes=np.arange(8), y=y_train)
 class_weight = dict(enumerate(class_weights))
 
@@ -499,7 +478,7 @@ for file_name in testing_source_files:
     test_images.append((os.path.join(config.TESTING_SOURCE_PATH, file_name), true_label))
 
 print(f"\nPredicting {len(test_images)} files from testing set")
-print("Class Mapping:", {i: name for i, name in enumerate(raw_train_ds.class_names)})
+print("Class Mapping:", {i: name for i, name in enumerate(config.LABELS)})
 
 # table header
 header = f"| {'File':<30} | {'True Label':<15} | {'Predicted':<15} | {'Pred ID':<8} | {'X ID':<5} | {'Probabilities':<50} |"
@@ -516,7 +495,7 @@ for img_path, true_label in test_images:
 
         classes = model.predict(img_array, batch_size=1, verbose=0)
         pred_idx = np.argmax(classes)
-        pred_label = raw_train_ds.class_names[pred_idx]
+        pred_label = config.LABELS[pred_idx]
         x_idx = np.argmax((classes > 0.05).astype("int32"))
 
         # table row

@@ -42,14 +42,14 @@ class Config:
         else:
             PROJECT_ROOT = Path(os.getcwd())
 
-        CACHE_DIR = PROJECT_ROOT / "cache" / "odir5k_multi_label_classification"
+        CACHE_DIR = Path(f"{PROJECT_ROOT}/cache/odir5k_multi_label_classification")
 
     DATASET_DIR = PROJECT_ROOT / "ODIR-5K"
 
     # Dataset configuration
     ANNOTATION_FILE_NAME = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
-    TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images/'
-    TESTING_SOURCE_PATH = 'ODIR-5K_Testing_Images/'
+    TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images'
+    TESTING_SOURCE_PATH = 'ODIR-5K_Testing_Images'
     LABELS = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
     VALIDATION_FRACTION = 0.1
 
@@ -250,13 +250,11 @@ def _get_balanced_dataset(self: tf.data.Dataset, num_classes=8) -> tf.data.Datas
 tf.data.Dataset._get_raw_cached_dataset = _get_raw_cached_dataset
 tf.data.Dataset._get_balanced_dataset = _get_balanced_dataset
 
-@tf.function
 def load_image(path, label):
     image = tf.io.read_file(path)
     image = tf.image.decode_jpeg(image, channels=3)
     return image, label
 
-@tf.function
 def resize_image(image, label):
     image = tf.image.resize_with_pad(
         image, config.TARGET_SIZE[0],
@@ -266,7 +264,6 @@ def resize_image(image, label):
     image.set_shape([config.TARGET_SIZE[0], config.TARGET_SIZE[1], 3])
     return image, label
 
-@tf.function
 def crop_image(image, label):
     mask = tf.reduce_sum(image, axis=-1) > 10
     non_zero_coords = tf.where(mask)
@@ -282,7 +279,6 @@ def crop_image(image, label):
     image = tf.image.crop_to_bounding_box(image, y_min, x_min, y_max - y_min + 1, x_max - x_min + 1)
     return image, label
 
-@tf.function
 def CLAHE(image, label):
     # uint8 format (0-255)
     image = tf.cast(image, tf.uint8)
@@ -347,22 +343,16 @@ if os.path.isfile(str(config.MODEL_SAVE_FINAL)) and config.USE_PRETRAINED_MODEL:
 else:
     print("No using saved model")
     if config.USE_MODEL == "using custom":
-        augmentation_layers = tf.keras.Sequential([
-            tf.keras.layers.RandomRotation(factor=0.1, fill_mode="nearest"),
-            tf.keras.layers.RandomZoom(height_factor=0.15, width_factor=0.15, fill_mode="nearest"),
-            tf.keras.layers.RandomTranslation(height_factor=0.05, width_factor=0.05, fill_mode="nearest"),
-            tf.keras.layers.RandomBrightness(factor=0.15, value_range=(0, 1)),
-            tf.keras.layers.RandomContrast(factor=0.15),
-            tf.keras.layers.GaussianNoise(stddev=0.01),
-            tf.keras.layers.RandomZoom(height_factor=(-0.02, 0.02), width_factor=(-0.02, 0.02), fill_mode="nearest"),
-        ])
-
-        rescaling_layer = tf.keras.layers.Rescaling(1./255)
-
         inputs = tf.keras.Input(shape=config.TARGET_SIZE + config.SHAPE_ADD)
+        x = tf.keras.layers.Rescaling(1./255)(inputs)
 
-        x = rescaling_layer(inputs)
-        x = augmentation_layers(x)
+        x = tf.keras.layers.RandomRotation(factor=0.1, fill_mode="nearest")(x)
+        x = tf.keras.layers.RandomZoom(height_factor=0.15, width_factor=0.15, fill_mode="nearest")(x)
+        x = tf.keras.layers.RandomTranslation(height_factor=0.05, width_factor=0.05, fill_mode="nearest")(x)
+        x = tf.keras.layers.RandomBrightness(factor=0.15, value_range=(0, 1))(x)
+        x = tf.keras.layers.RandomContrast(factor=0.15)(x)
+        x = tf.keras.layers.GaussianNoise(stddev=0.01)(x)
+        x = tf.keras.layers.RandomZoom(height_factor=(-0.02, 0.02), width_factor=(-0.02, 0.02), fill_mode="nearest")(x)
 
         # Conv larger kernel
         x = tf.keras.layers.Conv2D(32, (7,7), padding='same', activation='relu')(x)

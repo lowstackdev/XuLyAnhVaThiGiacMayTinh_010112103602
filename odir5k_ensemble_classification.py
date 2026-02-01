@@ -345,14 +345,12 @@ validation_ds = val_gen.to_tf_dataset(name="validation", augment=False)
 model_odir5kmcc = tf.keras.models.load_model(odir5kmcc.CHECKPOINT_PATH)
 model_odir5kmlc = tf.keras.models.load_model(odir5kmlc.CHECKPOINT_PATH)
 
-backbone_odir5kmcc = tf.keras.Sequential(model_odir5kmcc.layers[:-4], name="backbone_odir5kmcc")
-backbone_odir5kmlc = tf.keras.Sequential(model_odir5kmlc.layers[:-7], name="backbone_odir5kmlc")
+backbone_odir5kmcc = tf.keras.Sequential(model_odir5kmcc.layers[:-4])
+backbone_odir5kmlc = tf.keras.Sequential(model_odir5kmlc.layers[:-7])
 
 inputs = tf.keras.layers.Input(shape=config.TARGET_SIZE + config.SHAPE_ADD)
 
 feat_odir5kmcc = backbone_odir5kmcc(inputs)
-feat_odir5kmcc = tf.keras.layers.GlobalAveragePooling2D()(feat_odir5kmcc)
-
 feat_odir5kmlc = backbone_odir5kmlc(inputs)
 
 feat_merged = tf.keras.layers.Concatenate()([feat_odir5kmcc, feat_odir5kmlc])
@@ -371,7 +369,7 @@ model.compile(
     loss=config.LOSS,
     optimizer=config.OPTIMIZER,
     metrics=config.METRICS,
-    loss_weights={'output_odir5kmcc': 1.0, 'output_odir5kmlc': 1.0}
+    loss_weights={'output_odir5kmcc': 0.7, 'output_odir5kmlc': 0.3}
 )
 
 # %%
