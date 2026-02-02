@@ -25,3 +25,21 @@ input?.addEventListener('change', ({ target }) => {
   }
   if (uploadBtn) uploadBtn.style.display = 'none'
 })
+
+// TTS Logic
+const speakBtn = document.querySelector('#speak-btn')
+speakBtn?.addEventListener('click', () => {
+    const enText = speakBtn.dataset.en;
+    const viText = speakBtn.dataset.vi;
+
+    const speak = (text, lang) => {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = lang;
+        utterance.rate = 0.9;
+        window.speechSynthesis.speak(utterance);
+    };
+
+    // Speak English then Vietnamese
+    speak(enText, 'en-US');
+    setTimeout(() => speak(viText, 'vi-VN'), 4000);
+});

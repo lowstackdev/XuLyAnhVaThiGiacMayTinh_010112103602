@@ -70,53 +70,35 @@
                             <div class="diagnosis-header">
                                 <span class="label">Detection Result</span>
                                 <div class="disease-voice-header">
-                                    <h2 class="disease-label">Diabetic Retinopathy</h2>
+                                    <h2 class="disease-label">{{ mcc_name_en }}</h2>
                                     <button type="button" id="speak-btn" class="btn-icon" title="Listen to Result"
-                                        data-en="Detected Diabetic Retinopathy with 92.5% confidence."
-                                        data-vi="Phát hiện Bệnh võng mạc đái tháo đường với độ tin cậy 92.5%.">
+                                        data-en="{{ voice_en }}"
+                                        data-vi="{{ voice_vi }}">
                                         <i class='bx bx-volume-full'></i>
                                     </button>
                                 </div>
+                                <p class="mcc-detail">Main classification with {{ mcc_prob }}% confidence.</p>
                             </div>
 
                             <div class="probabilities">
-                                <h3>Confidence Breakdown</h3>
+                                <h3>Full Condition Analysis</h3>
                                 <div class="prob-list">
-                                    <div class="prob-item">
+                                    {% for res in mlc_results %}
+                                    <div class="prob-item {% if res.prob >= 50 %}high-risk{% endif %}">
                                         <div class="prob-info">
-                                            <span class="lab">Diabetic Retinopathy</span>
-                                            <span class="val">92.5%</span>
+                                            <span class="lab">{{ res.name }}</span>
+                                            <span class="val">{{ res.prob }}%</span>
                                         </div>
                                         <div class="progress-bar">
-                                            <div class="progress" style="--progress-width: 92.5%;">
+                                            <div class="progress" style="--progress-width: {{ res.prob }}%;">
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="prob-item">
-                                        <div class="prob-info">
-                                            <span class="lab">Glaucoma</span>
-                                            <span class="val">5.3%</span>
-                                        </div>
-                                        <div class="progress-bar">
-                                            <div class="progress" style="--progress-width: 5.3%;">
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="prob-item">
-                                        <div class="prob-info">
-                                            <span class="lab">Cataract</span>
-                                            <span class="val">2.2%</span>
-                                        </div>
-                                        <div class="progress-bar">
-                                            <div class="progress" style="--progress-width: 2.2%;">
-                                            </div>
-                                        </div>
-                                    </div>
+                                    {% endfor %}
                                 </div>
                             </div>
 
                             <div class="action-buttons">
-
                                 <a href="/" class="btn btn-secondary">
                                     <i class='bx bx-refresh'></i> New Analysis
                                 </a>
@@ -136,8 +118,8 @@
                                         <p>Standard Fundus Photography (Max 2MB)</p>
                                     </div>
                                     {% elif readImg == '1' %}
-                                    <!-- <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/Fundus_photograph_of_normal_right_eye.jpg/640px-Fundus_photograph_of_normal_right_eye.jpg"
-                                        alt="Analyzed Retina" class="analyzed-img"> -->
+                                    <img src="{{ url_for('static', filename=img_url) }}"
+                                        alt="Analyzed Retina" class="analyzed-img">
                                     <div class="scan-overlay"></div>
                                     {% endif %}
                                 </div>
