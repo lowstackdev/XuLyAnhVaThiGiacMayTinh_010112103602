@@ -68,18 +68,18 @@ class Config:
             'accuracy',
             tf.keras.metrics.Precision(name='precision'),
             tf.keras.metrics.Recall(name='recall'),
-            tf.keras.metrics.AUC(multi_label=True, name='auc')
+            tf.keras.metrics.AUC(multi_label=True, num_labels=len(LABELS), name='auc')
         ],
         'output_odir5kmlc': [
             tf.keras.metrics.BinaryAccuracy(name='accuracy'),
             tf.keras.metrics.Precision(name='precision'),
             tf.keras.metrics.Recall(name='recall'),
-            tf.keras.metrics.AUC(multi_label=True, name='auc')
+            tf.keras.metrics.AUC(multi_label=True, num_labels=len(LABELS), name='auc')
         ],
     }
 
     # Model paths
-    MODEL_DIR = PROJECT_ROOT / "Trained_Models" / "ODIR-5K-Ensemble-Classification"
+    MODEL_DIR = PROJECT_ROOT / "Trained_Models" / "ODIR5K-Ensemble-Classification"
     MODEL_SAVE_WEIGHTS = str(MODEL_DIR / 'ODIR5K_weights.weights.h5')
     MODEL_SAVE_FINAL = str(MODEL_DIR / 'ODIR5K_final.keras')
     CHECKPOINT_PATH = str(MODEL_DIR / 'ODIR5K.keras')
@@ -386,15 +386,6 @@ output_odir5kmlc = tf.keras.layers.Dense(8, activation='sigmoid', name='output_o
 model = tf.keras.models.Model(inputs=inputs, outputs=[output_odir5kmcc, output_odir5kmlc])
 
 model.summary(line_length=100)
-model.compile(
-    loss=config.LOSS,
-    optimizer=config.OPTIMIZER,
-    metrics=config.METRICS,
-    loss_weights={
-        'output_odir5kmcc': 0.3,
-        'output_odir5kmlc': 0.7,
-    }
-)
 
 # %%
 class TaskWeightScheduler(tf.keras.callbacks.Callback):
@@ -402,12 +393,18 @@ class TaskWeightScheduler(tf.keras.callbacks.Callback):
     Implements Dynamic Weight Averaging (DWA) to balance task losses.
     Based on: https://arxiv.org/abs/1803.10704
     """
-    def __init__(self, task_names, temperature=2.0):
+    def __init__(self, task_names, initial_weights=None, temperature=2.0):
         super(TaskWeightScheduler, self).__init__()
         self.task_names = task_names
         self.temperature = temperature
         self.loss_history = {name: [] for name in task_names}
-        self.task_weights = {name: 1.0 for name in task_names}
+
+        self.task_weights = {}
+        for name in task_names:
+            val = initial_weights[name] if initial_weights and name in initial_weights else 1.0
+            self.task_weights[name] = tf.Variable(
+                val, trainable=False, dtype=tf.float32, name=f"weight_{name}"
+            )
 
     def on_epoch_end(self, epoch, logs=None):
         # 1. Update loss history
@@ -420,35 +417,39 @@ class TaskWeightScheduler(tf.keras.callbacks.Callback):
         if epoch >= 1 and all(len(h) >= 2 for h in self.loss_history.values()):
             rs = []
             for name in self.task_names:
-                r = self.loss_history[name][-1] / self.loss_history[name][-2]
+                r = self.loss_history[name][-1] / (self.loss_history[name][-2] + 1e-8)
                 rs.append(r)
 
             rs = np.array(rs)
             exp_rs = np.exp(rs / self.temperature)
             new_weights = (len(self.task_names) * exp_rs) / np.sum(exp_rs)
 
-            for i, name in enumerate(self.task_names):
-                self.task_weights[name] = float(new_weights[i])
-
             print(f"\n--- Epoch {epoch+1}: DWA updated task weights ---")
-            for name, weight in self.task_weights.items():
-                print(f"  - {name}: {weight:.4f}")
+            for i, name in enumerate(self.task_names):
+                self.task_weights[name].assign(new_weights[i])
+                print(f"  - {name}: {float(new_weights[i]):.4f}")
 
-            # 3. Update model loss weights by re-compiling
-            self.model.compile(
-                optimizer=self.model.optimizer,
-                loss=self.model.loss,
-                loss_weights=self.task_weights,
-                metrics=config.METRICS
-            )
+initial_task_weights = {
+    'output_odir5kmcc': 0.3,
+    'output_odir5kmlc': 0.7,
+}
+weight_scheduler = TaskWeightScheduler(
+    task_names=['output_odir5kmcc', 'output_odir5kmlc'],
+    initial_weights=initial_task_weights
+)
+
+model.compile(
+    loss=config.LOSS,
+    optimizer=config.OPTIMIZER,
+    metrics=config.METRICS,
+    loss_weights=weight_scheduler.task_weights
+)
 
 # %%
 import gc
 gc.collect()
 
 config.MODEL_DIR.mkdir(parents=True, exist_ok=True)
-
-weight_scheduler = TaskWeightScheduler(task_names=['output_odir5kmcc', 'output_odir5kmlc'])
 
 callbacks = [
     weight_scheduler,
