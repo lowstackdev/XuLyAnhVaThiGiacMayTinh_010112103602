@@ -4,6 +4,9 @@ from pathlib import Path
 import shutil
 from abc import ABCMeta, abstractmethod
 from typing import Optional
+from collections import Counter, defaultdict
+from random import sample
+import re
 
 import tensorflow as tf
 import numpy as np
@@ -70,20 +73,29 @@ class Config:
         import google.colab
         PROJECT_ROOT = Path('/content/drive/MyDrive/Colab Notebooks')
         CACHE_DIR = Path("/content/cache")
+        TRAINING_PATH = "/content/training"
+        VALIDATION_PATH = "/content/validation"
     except ImportError:
-        CACHE_DIR = PROJECT_ROOT / "cache" / "odir5k_ensemble_classification"
+        if '__file__' in locals() or '__file__' in globals():
+            PROJECT_ROOT = Path(__file__).parent.resolve()
+        else:
+            PROJECT_ROOT = Path(os.getcwd())
+
+        CACHE_DIR = Path(f"{PROJECT_ROOT}/cache/odir5k_ensemble_classification")
+        TRAINING_PATH = "training"
+        VALIDATION_PATH = "validation"
 
     DATASET_DIR = PROJECT_ROOT / "ODIR-5K"
 
     # Dataset configuration
-    FILE_NAME = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
-    TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images/'
-    TESTING_SOURCE_PATH = 'ODIR-5K_Testing_Images/'
-    LABEL_STRINGS = ['Normal', 'Diabetes', 'Glaucoma', 'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Abnormalities']
+    ANNOTATION_FILE_NAME = 'ODIR-5K_Training_Annotations(Updated)_V2.xlsx'
+    TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images'
+    TESTING_SOURCE_PATH = 'ODIR-5K_Testing_Images'
+    LABELS = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
     VAL_FRACTION = 0.1
 
     # Image processing
-    TARGET_SIZE = (230, 230)
+    TARGET_SIZE = (512, 512)
     COLOR_MODE = 'rgb'
     COLOR_SHAPE_MAP = {'grayscale': (1,), 'rgb': (3,), 'rgba': (4,)}
     SHAPE_ADD = COLOR_SHAPE_MAP.get(COLOR_MODE, (3,))
@@ -126,220 +138,253 @@ config = Config()
 
 # %%
 os.chdir(config.DATASET_DIR)
-df = pd.read_excel(config.FILE_NAME)
+df = pd.read_excel(config.ANNOTATION_FILE_NAME)
 
 # %%
-left_eye_keywords = df['Left-Diagnostic Keywords'].copy().str.split("，")
-right_eye_keywords = df['Right-Diagnostic Keywords'].copy().str.split("，")
+left_eye_keywords = df['Left-Diagnostic Keywords'].copy()
+right_eye_keywords = df['Right-Diagnostic Keywords'].copy()
 
-test_df = df.copy()
-LABEL_COLS = test_df.columns[7:]
+left_eye_keywords = left_eye_keywords.str.split(re.compile(r'[,，]'))
+right_eye_keywords = right_eye_keywords.str.split(re.compile(r'[,，]'))
 
-def get_key_diagnosis_single(col_name):
-    other_diag_cols = [col for col in LABEL_COLS if col != col_name]
-    single_rows = test_df[(test_df[col_name] == 1) & (test_df[other_diag_cols].sum(axis=1) == 0)].index
-    unique_keywords = set().union(*[set(left_eye_keywords[row]) | set(right_eye_keywords[row]) for row in single_rows])
-    return list(unique_keywords)
+labels_dict = defaultdict(Counter)
+all_diagostic_keywords = [[] for _ in range(len(config.LABELS))]
+keyword_label_map = {}
 
-all_key_single_label = [get_key_diagnosis_single(LABEL_COLS[i]) for i in range(len(config.LABEL_STRINGS))]
+for _, row in df.iterrows():
+    keywords = []
+    for col in ["Left-Diagnostic Keywords", "Right-Diagnostic Keywords"]:
+        if isinstance(row[col], str):
+            kws = re.split(r'[,，]', row[col])
+            keywords.extend([kw.strip() for kw in kws if kw.strip()])
+
+    vec = row[config.LABELS].to_numpy()
+    active_idx = np.where(vec == 1)[0]
+
+    for kw in keywords:
+        for i in active_idx:
+            lab = config.LABELS[i]
+            labels_dict[lab][kw] += 1
+
+        counts = [labels_dict[config.LABELS[i]][kw] for i in active_idx]
+        best_idx = active_idx[np.argmax(counts)]
+        best_lab = config.LABELS[best_idx]
+
+        if kw not in keyword_label_map or labels_dict[best_lab][kw] > labels_dict[config.LABELS[keyword_label_map[kw]]][kw]:
+            if kw in keyword_label_map:
+                old_label_index = keyword_label_map[kw]
+                if kw in all_diagostic_keywords[old_label_index]:
+                    all_diagostic_keywords[old_label_index].remove(kw)
+
+            keyword_label_map[kw] = best_idx
+            all_diagostic_keywords[best_idx].append(kw)
+
+all_diagostic_keywords = [list(set(keywords)) for keywords in all_diagostic_keywords]
 
 # %%
-class DataGenerator(tf.keras.utils.Sequence):
-    def __init__(self, df, source_path, batch_size=32, img_size=(230, 230), color_mode='rgb', augment=False, task_name='joint', shuffle=True):
-        self.df = df.reset_index(drop=True)
-        self.source_path = source_path
-        self.batch_size = batch_size
-        self.img_size = img_size
-        self.augment = augment
-        self.task_name = task_name
-        self.shuffle = shuffle
-        self.n = len(self.df)
-        self.on_epoch_end()
+# Function for generate label to single image
 
-        self.augmentation_layers = tf.keras.Sequential([
-            tf.keras.layers.RandomRotation(factor=0.1, fill_mode="nearest"),
-            tf.keras.layers.RandomZoom(height_factor=0.15, width_factor=0.15, fill_mode="nearest"),
-            tf.keras.layers.RandomTranslation(height_factor=0.05, width_factor=0.05, fill_mode="nearest"),
-            tf.keras.layers.RandomBrightness(factor=0.15, value_range=(0, 1)),
-            tf.keras.layers.RandomContrast(factor=0.15),
-        ])
+# Return index in key of all diagnosis list
+def get_index_label(key, all_key):
+    return next((i for i, keywords in enumerate(all_key) if key in keywords), -1)
 
-    def __len__(self):
-        return self.n // self.batch_size
+# Return multilabel by index
+def get_multi_label_from_keys(label_idxs):
+    return [1 if i in label_idxs else 0 for i in range(len(config.LABELS))]
 
-    def on_epoch_end(self):
-        self.indexes = np.arange(self.n)
-        if self.shuffle: np.random.shuffle(self.indexes)
+def extract_fundus_dataset():
+    def process_fundus_entry(filename, keywords, all_key):
+        img_path = os.path.join(config.TRAINING_SOURCE_PATH, filename)
+        label = get_fundus_multi_label(img_path, keywords, all_key)
+        return img_path, label
 
-    def __getitem__(self, idx):
-        batch_indexes = self.indexes[idx * self.batch_size:(idx + 1) * self.batch_size]
-        batch_df = self.df.iloc[batch_indexes]
+    def get_fundus_multi_label(img_path, keywords, all_key):
+        if not os.path.exists(img_path):
+            return None
 
-        images = []
-        labels_mlc = []
-        labels_mcc = []
-
-        for _, row in batch_df.iterrows():
-            img_path = os.path.join(self.source_path, row['filename'])
-            img = self.load_and_preprocess_image(img_path)
-            images.append(img)
-
-            # Label MLC (multi-label)
-            mlc_label = row[config.LABEL_STRINGS].values.astype(np.float32)
-            labels_mlc.append(mlc_label)
-
-            # Label MCC (one-hot)
-            # Pick the first active disease, or normal if none
-            mcc_label = np.zeros(len(config.LABEL_STRINGS), dtype=np.float32)
-            active_indices = np.where(mlc_label == 1)[0]
-            if len(active_indices) > 0: mcc_label[active_indices[0]] = 1.0
-            else: mcc_label[0] = 1.0 # Normal
-            labels_mcc.append(mcc_label)
-
-        X = np.array(images, dtype=np.float32)
-        if self.augment: X = self.augmentation_layers(X, training=True).numpy()
-
-        Y_mlc = np.array(labels_mlc)
-        Y_mcc = np.array(labels_mcc)
-
-        if self.task_name == 'multi_class_classification': return X, Y_mcc
-        elif self.task_name == 'multi_label_classification': return X, Y_mlc
-        elif self.task_name == 'joint': return X, {'output_odir5kmcc': Y_mcc, 'output_odir5kmlc': Y_mlc}
-
-    def load_and_preprocess_image(self, image_path):
-        img = cv2.imread(image_path)
-        if img is None: return np.zeros((*self.img_size, 3))
-
-        # CLAHE enhancement
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
-        l2 = clahe.apply(l)
-        lab = cv2.merge((l2, a, b))
-        img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-        # Crop and Resize
-        h, w = img.shape[:2]
-        if w != h:
-            side = min(w, h)
-            left = (w - side) // 2
-            top = (h - side) // 2
-            img = img[top:top+side, left:left+side]
-
-        img = cv2.resize(img, self.img_size, interpolation=cv2.INTER_AREA)
-        return img / 255.0
-
-    def to_tf_dataset(self, name="train", augment=False):
-
-        def gen_callable():
-            # Iterate through each batch generator
-            for i in range(len(self)):
-                X, Y = self[i]
-                # Unpack batch into individual samples
-                for j in range(len(X)):
-                    yield X[j], (Y['output_odir5kmcc'][j], Y['output_odir5kmlc'][j])
-
-        # output signature (data types + shapes)
-        output_signature = (
-            tf.TensorSpec(shape=(*self.img_size, 3), dtype=tf.float32),
-            (
-                tf.TensorSpec(shape=(8,), dtype=tf.float32),
-                tf.TensorSpec(shape=(8,), dtype=tf.float32)
-            )
-        )
-
-        ds = tf.data.Dataset.from_generator(gen_callable, output_signature=output_signature)
-
-        cache_dir = config.CACHE_DIR / 'generator_cache'
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        for lockfile in cache_dir.glob(f"{name}*.lockfile"):
-            try: os.remove(lockfile)
-            except: pass
-
-        ds = ds.cache(str(cache_dir / name))
-
-        if name == "training": ds = ds.shuffle(buffer_size=min(self.n, 1000))
-        ds = ds.batch(self.batch_size)
-
-        def format_output(image, labels):
-            if augment: image = self.augmentation_layers(image, training=True)
-            return image, {'output_odir5kmcc': labels[0], 'output_odir5kmlc': labels[1]}
-
-        ds = ds.map(format_output, num_parallel_calls=tf.data.AUTOTUNE)
-        ds = ds.prefetch(tf.data.AUTOTUNE)
-
-        return ds
-
-class ODIR5kDataLoader:
-    def __init__(self, df, all_key_single_label):
-        self.df = df
-        self.all_key_single_label = all_key_single_label
-        self._prepare_data()
-
-    def _prepare_data(self):
-        records = []
-        for _, row in self.df.iterrows():
-            # Patient ID
-            patient_id = str(row['ID'])
-
-            # Left Eye
-            left_img = row['Left-Fundus']
-            left_keywords = row['Left-Diagnostic Keywords'].split('，')
-            left_labels = self._keywords_to_label(left_keywords)
-            records.append({
-                'filename': left_img,
-                'patient_id': patient_id,
-                **{name: val for name, val in zip(config.LABEL_STRINGS, left_labels)}
-            })
-
-            # Right Eye
-            right_img = row['Right-Fundus']
-            right_keywords = row['Right-Diagnostic Keywords'].split('，')
-            right_labels = self._keywords_to_label(right_keywords)
-            records.append({
-                'filename': right_img,
-                'patient_id': patient_id,
-                **{name: val for name, val in zip(config.LABEL_STRINGS, right_labels)}
-            })
-
-        self.expanded_df = pd.DataFrame(records)
-
-    def _keywords_to_label(self, keywords):
-        label = np.zeros(len(config.LABEL_STRINGS))
-        for kw in keywords:
-            kw_lower = kw.lower().strip()
-            found = False
-            for i, k_list in enumerate(self.all_key_single_label):
-                if any(k.lower() == kw_lower for k in k_list):
-                    label[i] = 1
-                    found = True
-            if not found and kw_lower != "":
-                label[7] = 1 # Others/Abnormalities
-
-        # If no specific disease found but labeled as normal... or if keywords list empty
-        if np.sum(label) == 0:
-            label[0] = 1
+        # generate multi-label
+        indices = [get_index_label(key, all_key) for key in keywords]
+        indices = list(set(indices))
+        label = get_multi_label_from_keys(indices)
 
         return label
 
-    def split_data(self, val_fraction=0.1):
-        gss = GroupShuffleSplit(n_splits=1, test_size=val_fraction, random_state=42)
-        train_idx, val_idx = next(gss.split(self.expanded_df, groups=self.expanded_df['patient_id']))
+    paths, labels = [], []
 
-        train_df = self.expanded_df.iloc[train_idx]
-        val_df = self.expanded_df.iloc[val_idx]
+    for col, keywords in [('Left-Fundus', left_eye_keywords), ('Right-Fundus', right_eye_keywords)]:
+        for filename, keywords in zip(df[col], keywords):
+            path, label = process_fundus_entry(filename, keywords, all_diagostic_keywords)
+            if label: paths.append(path); labels.append(label)
 
-        return train_df, val_df
+    return np.array(paths), np.array(labels)
 
-loader = ODIR5kDataLoader(df, all_key_single_label)
-train_df, val_df = loader.split_data(val_fraction=config.VAL_FRACTION)
+synthetic_paths, synthetic_labels = extract_fundus_dataset()
 
-train_gen = DataGenerator(train_df, config.TRAINING_SOURCE_PATH, augment=False)
-val_gen = DataGenerator(val_df, config.TRAINING_SOURCE_PATH, augment=False, shuffle=False)
+# Grouping by patient ID to prevent data leakage
+groups = [os.path.basename(p).split('_')[0] for p in synthetic_paths]
 
-train_ds = train_gen.to_tf_dataset(name="training", augment=True)
-validation_ds = val_gen.to_tf_dataset(name="validation", augment=False)
+gss = GroupShuffleSplit(n_splits=1, test_size=config.VALIDATION_FRACTION, random_state=1)
+train_idx, val_idx = next(gss.split(synthetic_paths, synthetic_labels, groups=groups))
+
+training_paths = synthetic_paths[train_idx]
+training_labels = synthetic_labels[train_idx]
+
+validation_paths = synthetic_paths[val_idx]
+validation_labels = synthetic_labels[val_idx]
+
+print("n training samples:", len(training_paths))
+print("n validation samples:", len(validation_paths))
+
+del synthetic_paths
+del synthetic_labels
+
+# %%
+# caching data
+def _get_raw_cached_dataset(self: tf.data.Dataset, name) -> tf.data.Dataset:
+    cache_dir = config.CACHE_DIR / '_get_raw_cached_dataset'
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    for lockfile in cache_dir.glob("*.lockfile"):
+        try: lockfile.unlink(missing_ok=True)
+        except Exception: pass
+
+    cache_path = str(cache_dir / f"{name}.cache")
+    self = self.cache(cache_path)
+
+    # warmup cache
+    if not (cache_dir / f"{name}.cache").exists():
+        self.enumerate().reduce(np.int64(0), lambda x, _: x + 1)
+
+    return self
+
+# oversampling data
+def get_balanced_dataset(self, num_samples, num_classes=8):
+    class_datasets = []
+    for i in range(num_classes):
+        class_ds = self.filter(lambda x, y: tf.argmax(y['output_odir5kmcc']) == i).repeat()
+        class_datasets.append(class_ds)
+
+    balanced_ds = tf.data.Dataset.sample_from_datasets(
+        class_datasets,
+        weights=[1.0/num_classes] * num_classes
+    )
+    return balanced_ds.take(num_samples)
+
+# extension methods
+tf.data.Dataset._get_raw_cached_dataset = _get_raw_cached_dataset
+
+def load_image(path):
+    image = tf.io.read_file(path)
+    image = tf.image.decode_jpeg(image, channels=3)
+    return image
+
+def resize_image(image):
+    image = tf.image.resize_with_pad(
+        image, config.TARGET_SIZE[0],
+        config.TARGET_SIZE[1],
+        method=tf.image.ResizeMethod.BILINEAR
+    )
+    image.set_shape([config.TARGET_SIZE[0], config.TARGET_SIZE[1], 3])
+    return image
+
+def crop_image(image):
+    mask = tf.reduce_sum(image, axis=-1) > 10
+    non_zero_coords = tf.where(mask)
+
+    if tf.shape(non_zero_coords)[0] == 0:
+        return image
+
+    y_min = tf.cast(tf.reduce_min(non_zero_coords[:, 0]), tf.int32)
+    y_max = tf.cast(tf.reduce_max(non_zero_coords[:, 0]), tf.int32)
+    x_min = tf.cast(tf.reduce_min(non_zero_coords[:, 1]), tf.int32)
+    x_max = tf.cast(tf.reduce_max(non_zero_coords[:, 1]), tf.int32)
+
+    image = tf.image.crop_to_bounding_box(image, y_min, x_min, y_max - y_min + 1, x_max - x_min + 1)
+    return image
+
+def CLAHE(image):
+    # uint8 format (0-255)
+    image = tf.cast(image, tf.uint8)
+    image_shape = image.shape
+
+    # input numpy array
+    image = tf.numpy_function(func=clahe_cv2, inp=[image], Tout=tf.uint8)
+
+    # Reset shape
+    image.set_shape(image_shape)
+    return image
+
+def clahe_cv2(image):
+    # input numpy array
+    if not isinstance(image, np.ndarray):
+        image = np.array(image)
+
+    # RGB to LAB
+    lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+    l, a, b = cv2.split(lab)
+
+    # CLAHE to the L-channel
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+
+    # Merge channels + convert back to RGB
+    lab = cv2.merge((l, a, b))
+    image_res = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+    return image_res
+
+def get_random_label_from_multilabel(multi_labels):
+    return np.array([
+        np.random.choice(np.where(row == 1)[0]) if np.any(row == 1) else 0
+        for row in multi_labels
+    ])
+
+indices_mc_random = get_random_label_from_multilabel(training_labels)
+training_labels_mcc = tf.keras.utils.to_categorical(indices_mc_random, num_classes=len(config.LABELS))
+training_labels_mlc = training_labels
+
+indices_mc_random_val = get_random_label_from_multilabel(validation_labels)
+validation_labels_mcc = tf.keras.utils.to_categorical(indices_mc_random_val, num_classes=len(config.LABELS))
+validation_labels_mlc = validation_labels
+
+raw_train_ds = tf.data.Dataset.from_tensor_slices((
+    training_paths,
+    {
+        'output_odir5kmcc': training_labels_mcc,
+        'output_odir5kmlc': training_labels_mlc,
+    }
+))
+raw_val_ds = tf.data.Dataset.from_tensor_slices((
+    validation_paths, {
+        'output_odir5kmcc': validation_labels_mcc,
+        'output_odir5kmlc': validation_labels_mlc,
+    }
+))
+
+train_ds_generator = (
+    raw_train_ds
+    .shuffle(len(training_paths))
+    .apply(lambda ds: get_balanced_dataset(ds, len(training_paths), num_classes=8))
+    .map(lambda path, lbl: (load_image(path), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (crop_image(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (resize_image(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (CLAHE(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    ._get_raw_cached_dataset(name="training")
+    ._get_balanced_dataset()
+    .shuffle(buffer_size=1000)
+    .batch(config.BATCH_SIZE, drop_remainder=False)
+    .prefetch(buffer_size=tf.data.AUTOTUNE)
+)
+
+validation_ds_generator = (
+    raw_val_ds
+    .map(lambda path, lbl: (load_image(path), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (crop_image(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (resize_image(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (CLAHE(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    ._get_raw_cached_dataset(name="validation")
+    .batch(config.BATCH_SIZE, drop_remainder=False)
+    .prefetch(buffer_size=tf.data.AUTOTUNE)
+)
 
 # %%
 model_odir5kmcc = tf.keras.models.load_model(odir5kmcc.CHECKPOINT_PATH)
@@ -369,7 +414,10 @@ model.compile(
     loss=config.LOSS,
     optimizer=config.OPTIMIZER,
     metrics=config.METRICS,
-    loss_weights={'output_odir5kmcc': 0.7, 'output_odir5kmlc': 0.3}
+    loss_weights={
+        'output_odir5kmcc': 0.3,
+        'output_odir5kmlc': 0.7,
+    }
 )
 
 # %%
@@ -388,8 +436,8 @@ callbacks = [
 ]
 
 history = model.fit(
-    train_ds,
-    validation_data=validation_ds,
+    train_ds_generator,
+    validation_data=validation_ds_generator,
     epochs=config.EPOCHS,
     verbose=1,
     callbacks=callbacks
@@ -427,54 +475,36 @@ for key, label in metrics:
 plt.show()
 
 # %%
-# Testing and Prediction on Test Set
 test_files = sorted([f for f in os.listdir(config.TESTING_SOURCE_PATH) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
 print(f"\nTotal testing images found: {len(test_files)}")
 
-def preprocess_test_image(img_path, target_size):
-    img = cv2.imread(img_path)
-    if img is None: return np.zeros((*target_size, 3))
-
-    # CLAHE enhancement
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    l2 = clahe.apply(l)
-    lab = cv2.merge((l2, a, b))
-    img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-    # Square Crop
-    h, w = img.shape[:2]
-    side = min(w, h)
-    img = img[(h-side)//2 : (h+side)//2, (w-side)//2 : (w+side)//2]
-
-    # Resize
-    img = cv2.resize(img, target_size, interpolation=cv2.INTER_AREA)
-    return img / 255.0
-
-# Table header for results
-print(f"\n{'File Name':<25} | {'MCC Prediction':<20} | {'MLC Active Labels (Multi-label)':<40}")
+# header
+print(f"\n{'File Name':<25} | {'MCC Prediction':<20} | {'MLC Active Labels':<40}")
 print("-" * 90)
 
-# Batch prediction for efficiency (optional, here doing one by one for clarity)
-for i in range(min(100, len(test_files))): # Show first 100 predictions
+for i in range(len(test_files)):
     img_path = os.path.join(config.TESTING_SOURCE_PATH, test_files[i])
-    img = preprocess_test_image(img_path, config.TARGET_SIZE)
-    img_batch = np.expand_dims(img, axis=0)
 
-    # Predict
+    # preprocess
+    img = load_image(img_path)
+    img = crop_image(img)
+    img = resize_image(img)
+    img = CLAHE(img)
+    img = tf.cast(img, tf.float32) / 255.0
+    img_batch = tf.expand_dims(img, axis=0)
+
+    # predict
     preds = model.predict(img_batch, verbose=0)
     # preds[0] -> output_odir5kmcc (Softmax - 8)
     # preds[1] -> output_odir5kmlc (Sigmoid - 8)
 
-    # Process MCC (Single class)
+    # process MCC (Single class)
     mcc_idx = np.argmax(preds[0][0])
-    mcc_label = config.LABEL_STRINGS[mcc_idx]
+    mcc_label = config.LABELS[mcc_idx]
 
-    # Process MLC (Multiple labels)
+    # process MLC (Multiple labels)
     mlc_probs = preds[1][0]
-    active_labels = [config.LABEL_STRINGS[j] for j, prob in enumerate(mlc_probs) if prob >= 0.5]
+    active_labels = [config.LABELS[j] for j, prob in enumerate(mlc_probs) if prob >= 0.5]
     mlc_label_str = ", ".join(active_labels) if active_labels else "None"
 
     print(f"{test_files[i]:<25} | {mcc_label:<20} | {mlc_label_str:<40}")

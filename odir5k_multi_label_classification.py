@@ -98,7 +98,6 @@ right_eye_keywords = df['Right-Diagnostic Keywords'].copy()
 left_eye_keywords = left_eye_keywords.str.split(re.compile(r'[,，]'))
 right_eye_keywords = right_eye_keywords.str.split(re.compile(r'[,，]'))
 
-# %%
 labels_dict = defaultdict(Counter)
 all_diagostic_keywords = [[] for _ in range(len(config.LABELS))]
 keyword_label_map = {}
@@ -250,26 +249,26 @@ def _get_balanced_dataset(self: tf.data.Dataset, num_classes=8) -> tf.data.Datas
 tf.data.Dataset._get_raw_cached_dataset = _get_raw_cached_dataset
 tf.data.Dataset._get_balanced_dataset = _get_balanced_dataset
 
-def load_image(path, label):
+def load_image(path):
     image = tf.io.read_file(path)
     image = tf.image.decode_jpeg(image, channels=3)
-    return image, label
+    return image
 
-def resize_image(image, label):
+def resize_image(image):
     image = tf.image.resize_with_pad(
         image, config.TARGET_SIZE[0],
         config.TARGET_SIZE[1],
         method=tf.image.ResizeMethod.BILINEAR
     )
     image.set_shape([config.TARGET_SIZE[0], config.TARGET_SIZE[1], 3])
-    return image, label
+    return image
 
-def crop_image(image, label):
+def crop_image(image):
     mask = tf.reduce_sum(image, axis=-1) > 10
     non_zero_coords = tf.where(mask)
 
     if tf.shape(non_zero_coords)[0] == 0:
-        return image, label
+        return image
 
     y_min = tf.cast(tf.reduce_min(non_zero_coords[:, 0]), tf.int32)
     y_max = tf.cast(tf.reduce_max(non_zero_coords[:, 0]), tf.int32)
@@ -277,9 +276,9 @@ def crop_image(image, label):
     x_max = tf.cast(tf.reduce_max(non_zero_coords[:, 1]), tf.int32)
 
     image = tf.image.crop_to_bounding_box(image, y_min, x_min, y_max - y_min + 1, x_max - x_min + 1)
-    return image, label
+    return image
 
-def CLAHE(image, label):
+def CLAHE(image):
     # uint8 format (0-255)
     image = tf.cast(image, tf.uint8)
     image_shape = image.shape
@@ -289,7 +288,7 @@ def CLAHE(image, label):
 
     # Reset shape
     image.set_shape(image_shape)
-    return image, label
+    return image
 
 def clahe_cv2(image):
     # input numpy array
@@ -314,10 +313,10 @@ raw_val_ds = tf.data.Dataset.from_tensor_slices((validation_paths, validation_la
 
 train_generator = (
     raw_train_ds
-    .map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
-    .map(crop_image, num_parallel_calls=tf.data.AUTOTUNE)
-    .map(resize_image, num_parallel_calls=tf.data.AUTOTUNE)
-    .map(CLAHE, num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda path, lbl: (load_image(path), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (crop_image(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (resize_image(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (CLAHE(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
     ._get_raw_cached_dataset(name="training")
     ._get_balanced_dataset()
     .shuffle(buffer_size=1000)
@@ -327,10 +326,10 @@ train_generator = (
 
 validation_generator = (
     raw_val_ds
-    .map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
-    .map(crop_image, num_parallel_calls=tf.data.AUTOTUNE)
-    .map(resize_image, num_parallel_calls=tf.data.AUTOTUNE)
-    .map(CLAHE, num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda path, lbl: (load_image(path), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (crop_image(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (resize_image(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
+    .map(lambda img, lbl: (CLAHE(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
     ._get_raw_cached_dataset(name="validation")
     .batch(config.BATCH_SIZE, drop_remainder=False)
     .prefetch(buffer_size=tf.data.AUTOTUNE)

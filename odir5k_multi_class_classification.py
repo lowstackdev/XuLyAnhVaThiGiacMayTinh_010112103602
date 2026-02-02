@@ -102,7 +102,6 @@ right_eye_keywords = df["Right-Diagnostic Keywords"].copy()
 left_eye_keywords = left_eye_keywords.str.split(re.compile(r'[,，]'))
 right_eye_keywords = right_eye_keywords.str.split(re.compile(r'[,，]'))
 
-# %%
 labels_dict = defaultdict(Counter)
 all_diagostic_keywords = [[] for _ in range(len(config.LABELS))]
 keyword_label_map = {}
