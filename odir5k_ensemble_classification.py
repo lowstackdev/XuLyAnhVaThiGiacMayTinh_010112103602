@@ -19,7 +19,6 @@ import cv2
 # %%
 class Config:
     # Project paths
-    PROJECT_ROOT = Path(__file__).parent.resolve()
     try:
         import google.colab
         PROJECT_ROOT = Path('/content/drive/MyDrive/Colab Notebooks')
