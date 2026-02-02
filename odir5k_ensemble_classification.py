@@ -16,55 +16,6 @@ from sklearn.model_selection import GroupShuffleSplit
 from PIL import Image
 import cv2
 
-from odir5k_multi_class_classification import config as odir5kmcc
-from odir5k_multi_label_classification import config as odir5kmlc
-
-# %%
-class TaskWeightScheduler(tf.keras.callbacks.Callback):
-    """
-    Implements Dynamic Weight Averaging (DWA) to balance task losses.
-    Based on: https://arxiv.org/abs/1803.10704
-    """
-    def __init__(self, task_names, temperature=2.0):
-        super(TaskWeightScheduler, self).__init__()
-        self.task_names = task_names
-        self.temperature = temperature
-        self.loss_history = {name: [] for name in task_names}
-        self.task_weights = {name: 1.0 for name in task_names}
-
-    def on_epoch_end(self, epoch, logs=None):
-        # 1. Update loss history
-        for name in self.task_names:
-            loss_val = logs.get(f"{name}_loss")
-            if loss_val is not None:
-                self.loss_history[name].append(loss_val)
-
-        # 2. DWA after the first epoch (at least 2 epochs of loss)
-        if epoch >= 1 and all(len(h) >= 2 for h in self.loss_history.values()):
-            rs = []
-            for name in self.task_names:
-                r = self.loss_history[name][-1] / self.loss_history[name][-2]
-                rs.append(r)
-
-            rs = np.array(rs)
-            exp_rs = np.exp(rs / self.temperature)
-            new_weights = (len(self.task_names) * exp_rs) / np.sum(exp_rs)
-
-            for i, name in enumerate(self.task_names):
-                self.task_weights[name] = float(new_weights[i])
-
-            print(f"\n--- Epoch {epoch+1}: DWA updated task weights ---")
-            for name, weight in self.task_weights.items():
-                print(f"  - {name}: {weight:.4f}")
-
-            # 3. Update model loss weights by re-compiling
-            self.model.compile(
-                optimizer=self.model.optimizer,
-                loss=self.model.loss,
-                loss_weights=self.task_weights,
-                metrics=config.METRICS
-            )
-
 # %%
 class Config:
     # Project paths
@@ -92,7 +43,7 @@ class Config:
     TRAINING_SOURCE_PATH = 'ODIR-5K_Training_Images'
     TESTING_SOURCE_PATH = 'ODIR-5K_Testing_Images'
     LABELS = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
-    VAL_FRACTION = 0.1
+    VALIDATION_FRACTION = 0.1
 
     # Image processing
     TARGET_SIZE = (512, 512)
@@ -133,6 +84,9 @@ class Config:
     MODEL_SAVE_WEIGHTS = str(MODEL_DIR / 'ODIR5K_weights.weights.h5')
     MODEL_SAVE_FINAL = str(MODEL_DIR / 'ODIR5K_final.keras')
     CHECKPOINT_PATH = str(MODEL_DIR / 'ODIR5K.keras')
+
+    CHECKPOINT_PATH_ODIR5k_MCC = str(PROJECT_ROOT / "Trained_Models" / "ODIR5K-Multi-Class" / "ODIR5K.keras")
+    CHECKPOINT_PATH_ODIR5k_MLC = str(PROJECT_ROOT / "Trained_Models" / "ODIR5K-Multi-Label" / "ODIR5K.keras")
 
 config = Config()
 
@@ -369,7 +323,6 @@ train_ds_generator = (
     .map(lambda img, lbl: (resize_image(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
     .map(lambda img, lbl: (CLAHE(img), lbl), num_parallel_calls=tf.data.AUTOTUNE)
     ._get_raw_cached_dataset(name="training")
-    ._get_balanced_dataset()
     .shuffle(buffer_size=1000)
     .batch(config.BATCH_SIZE, drop_remainder=False)
     .prefetch(buffer_size=tf.data.AUTOTUNE)
@@ -387,20 +340,44 @@ validation_ds_generator = (
 )
 
 # %%
-model_odir5kmcc = tf.keras.models.load_model(odir5kmcc.CHECKPOINT_PATH)
-model_odir5kmlc = tf.keras.models.load_model(odir5kmlc.CHECKPOINT_PATH)
+model_odir5kmcc = tf.keras.models.load_model(config.CHECKPOINT_PATH_ODIR5k_MCC)
+model_odir5kmlc = tf.keras.models.load_model(config.CHECKPOINT_PATH_ODIR5k_MLC)
 
-backbone_odir5kmcc = tf.keras.Sequential(model_odir5kmcc.layers[:-4])
-backbone_odir5kmlc = tf.keras.Sequential(model_odir5kmlc.layers[:-7])
+backbone_odir5kmcc = tf.keras.Model(
+    inputs=model_odir5kmcc.inputs,
+    outputs=model_odir5kmcc.layers[-5].output,
+    name="backbone_mcc"
+)
+backbone_odir5kmcc.trainable = False
+
+backbone_odir5kmlc = tf.keras.Model(
+    inputs=model_odir5kmlc.inputs,
+    outputs=model_odir5kmlc.layers[-8].output,
+    name="backbone_mlc"
+)
+backbone_odir5kmlc.trainable = False
 
 inputs = tf.keras.layers.Input(shape=config.TARGET_SIZE + config.SHAPE_ADD)
 
 feat_odir5kmcc = backbone_odir5kmcc(inputs)
 feat_odir5kmlc = backbone_odir5kmlc(inputs)
 
-feat_merged = tf.keras.layers.Concatenate()([feat_odir5kmcc, feat_odir5kmlc])
+dim_mcc = backbone_odir5kmcc.output_shape[-1]
+dim_mlc = backbone_odir5kmlc.output_shape[-1]
 
-x = tf.keras.layers.Dense(512, activation='relu')(feat_merged)
+query = tf.keras.layers.Reshape((1, dim_mcc))(feat_odir5kmcc)
+value = tf.keras.layers.Reshape((1, dim_mlc))(feat_odir5kmlc)
+
+output_attention = tf.keras.layers.MultiHeadAttention(num_heads=4, key_dim=dim_mcc)(query=query, value=value)
+output_attention = tf.keras.layers.LayerNormalization()(output_attention)
+output_attention = tf.keras.layers.Flatten()(output_attention)
+
+feat_odir5kmcc_ln = tf.keras.layers.LayerNormalization()(feat_odir5kmcc)
+feat_odir5kmlc_ln = tf.keras.layers.LayerNormalization()(feat_odir5kmlc)
+
+feat_merged = tf.keras.layers.Concatenate()([feat_odir5kmcc_ln, feat_odir5kmlc_ln, output_attention])
+
+x = tf.keras.layers.Dense(512, activation='swish')(feat_merged)
 x = tf.keras.layers.BatchNormalization()(x)
 x = tf.keras.layers.Dropout(0.4)(x)
 
@@ -419,6 +396,52 @@ model.compile(
         'output_odir5kmlc': 0.7,
     }
 )
+
+# %%
+class TaskWeightScheduler(tf.keras.callbacks.Callback):
+    """
+    Implements Dynamic Weight Averaging (DWA) to balance task losses.
+    Based on: https://arxiv.org/abs/1803.10704
+    """
+    def __init__(self, task_names, temperature=2.0):
+        super(TaskWeightScheduler, self).__init__()
+        self.task_names = task_names
+        self.temperature = temperature
+        self.loss_history = {name: [] for name in task_names}
+        self.task_weights = {name: 1.0 for name in task_names}
+
+    def on_epoch_end(self, epoch, logs=None):
+        # 1. Update loss history
+        for name in self.task_names:
+            loss_val = logs.get(f"{name}_loss")
+            if loss_val is not None:
+                self.loss_history[name].append(loss_val)
+
+        # 2. DWA after the first epoch (at least 2 epochs of loss)
+        if epoch >= 1 and all(len(h) >= 2 for h in self.loss_history.values()):
+            rs = []
+            for name in self.task_names:
+                r = self.loss_history[name][-1] / self.loss_history[name][-2]
+                rs.append(r)
+
+            rs = np.array(rs)
+            exp_rs = np.exp(rs / self.temperature)
+            new_weights = (len(self.task_names) * exp_rs) / np.sum(exp_rs)
+
+            for i, name in enumerate(self.task_names):
+                self.task_weights[name] = float(new_weights[i])
+
+            print(f"\n--- Epoch {epoch+1}: DWA updated task weights ---")
+            for name, weight in self.task_weights.items():
+                print(f"  - {name}: {weight:.4f}")
+
+            # 3. Update model loss weights by re-compiling
+            self.model.compile(
+                optimizer=self.model.optimizer,
+                loss=self.model.loss,
+                loss_weights=self.task_weights,
+                metrics=config.METRICS
+            )
 
 # %%
 import gc
@@ -446,6 +469,9 @@ history = model.fit(
 # %%
 model.save_weights(config.MODEL_SAVE_WEIGHTS)
 model.save(config.MODEL_SAVE_FINAL)
+
+# %%
+model.evaluate(validation_ds_generator)
 
 # %%
 metrics = [
@@ -490,7 +516,8 @@ for i in range(len(test_files)):
     img = crop_image(img)
     img = resize_image(img)
     img = CLAHE(img)
-    img = tf.cast(img, tf.float32) / 255.0
+    img = tf.cast(img, tf.float32)
+
     img_batch = tf.expand_dims(img, axis=0)
 
     # predict

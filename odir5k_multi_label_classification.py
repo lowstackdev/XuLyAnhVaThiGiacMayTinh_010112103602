@@ -73,7 +73,7 @@ class Config:
     RECALL = tf.keras.metrics.Recall(thresholds=0.5, name='recall')
 
     # Model paths
-    MODEL_DIR = PROJECT_ROOT / "Trained_Models" / "ODIR-5K-Multi-Label"
+    MODEL_DIR = PROJECT_ROOT / "Trained_Models" / "ODIR5K-Multi-Label"
     MODEL_SAVE_WEIGHTS = str(MODEL_DIR / 'ODIR5K_weights.weights.h5')
     MODEL_SAVE_FINAL = str(MODEL_DIR / 'ODIR5K_final.keras')
     CHECKPOINT_PATH = str(MODEL_DIR / 'ODIR5K.keras')
