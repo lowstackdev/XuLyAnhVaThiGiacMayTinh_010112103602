@@ -12,6 +12,7 @@ tensorflowjs
 # Data Processing
 numpy
 pandas
+opencv-python-headless
 opencv-python
 Pillow
 albumentations
